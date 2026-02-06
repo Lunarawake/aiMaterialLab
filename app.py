@@ -249,6 +249,7 @@ def init_session_state():
         "sample_image_name": None,
         "ai_result": None,
         "api_key":   "",
+        "chat_history": [],
     }
     for key, val in defaults.items():
         if key not in st.session_state:
@@ -1232,6 +1233,96 @@ def render_dashboard():
 
 
 # ============================================================
+# Data Copilot (智能问答助手)
+# ============================================================
+def render_data_copilot():
+    """基于当前 DataFrame 的 AI 问答助手，放在所有 Tab 下方。"""
+
+    st.markdown('<hr class="section-divider">', unsafe_allow_html=True)
+
+    with st.expander("智能问答助手 (Data Copilot) — 向 AI 提问关于数据的问题", expanded=False):
+
+        api_key = st.session_state.get("api_key", "")
+        if not api_key:
+            st.info(
+                "请先在仪表盘 (Dashboard) 中输入 Gemini API Key，"
+                "然后即可在此向 AI 提问。"
+            )
+
+        # 显示聊天历史
+        chat_container = st.container(height=400)
+        with chat_container:
+            if not st.session_state["chat_history"]:
+                st.markdown(
+                    '<div style="text-align:center; color:#999; padding:2rem 0;">'
+                    '暂无对话。在下方输入框中提问，AI 将基于当前数据表回答。'
+                    '</div>',
+                    unsafe_allow_html=True,
+                )
+            for msg in st.session_state["chat_history"]:
+                with st.chat_message(msg["role"]):
+                    st.markdown(msg["content"])
+
+        # 输入框
+        user_input = st.chat_input(
+            "输入问题，例如: 哪一次实验的微管密度最低？",
+            key="copilot_input",
+        )
+
+        if user_input:
+            if not api_key:
+                st.warning("请先在仪表盘中填写 Gemini API Key。")
+                return
+
+            # 追加用户消息
+            st.session_state["chat_history"].append(
+                {"role": "user", "content": user_input}
+            )
+
+            # 构造上下文
+            df = st.session_state["df"]
+            csv_str = df.to_csv(index=False)
+            inp = st.session_state.get("input_columns", [])
+            out = st.session_state.get("output_columns", [])
+            mat = st.session_state.get("material_name", "")
+
+            system_prompt = (
+                "你是一个专业的实验数据分析助手。"
+                "请根据以下实验数据回答用户问题。"
+                "用简洁、专业的语言回答。"
+                "如果数据中找不到答案，请诚实告知。\n\n"
+                f"研究材料: {mat or '未指定'}\n"
+                f"参数列 (Inputs): {', '.join(inp) or '未指定'}\n"
+                f"结果列 (Outputs): {', '.join(out) or '未指定'}\n\n"
+                f"当前数据表 (CSV):\n```\n{csv_str}\n```"
+            )
+
+            # 拼接最近对话作为上下文 (最多保留最近 10 轮)
+            recent = st.session_state["chat_history"][-20:]
+            conversation = ""
+            for msg in recent[:-1]:  # 排除刚追加的当前用户消息
+                role_label = "用户" if msg["role"] == "user" else "助手"
+                conversation += f"{role_label}: {msg['content']}\n\n"
+            conversation += f"用户: {user_input}"
+
+            try:
+                genai.configure(api_key=api_key)
+                model = genai.GenerativeModel(
+                    "gemini-2.0-flash",
+                    system_instruction=system_prompt,
+                )
+                response = model.generate_content(conversation)
+                answer = response.text
+            except Exception as e:
+                answer = f"AI 回答失败: {str(e)}"
+
+            st.session_state["chat_history"].append(
+                {"role": "assistant", "content": answer}
+            )
+            st.rerun()
+
+
+# ============================================================
 # Main
 # ============================================================
 def main():
@@ -1250,6 +1341,9 @@ def main():
         render_dashboard()
     with tab_studio:
         render_data_studio()
+
+    # 智能问答助手 (在 Tab 之外)
+    render_data_copilot()
 
     # 页脚
     st.markdown(
