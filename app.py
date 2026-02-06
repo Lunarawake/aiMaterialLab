@@ -1,7 +1,7 @@
 """
 NEXUS 通用材料研发平台
 双视图架构：智能仪表盘 + 数据工作台
-支持定量目标设定
+支持定量目标设定 + 样品图像分析
 """
 
 import streamlit as st
@@ -9,6 +9,8 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 import google.generativeai as genai
+from PIL import Image
+import io
 
 
 # ============================================================
@@ -353,6 +355,12 @@ def init_session_state():
     if 'target_values' not in st.session_state:
         st.session_state['target_values'] = {}
     
+    # 样品图片
+    if 'sample_image' not in st.session_state:
+        st.session_state['sample_image'] = None
+    if 'sample_image_name' not in st.session_state:
+        st.session_state['sample_image_name'] = None
+    
     # AI 分析结果
     if 'ai_result' not in st.session_state:
         st.session_state['ai_result'] = None
@@ -432,9 +440,10 @@ def analyze_with_ai(
     input_cols: list,
     output_cols: list,
     target_values: dict,
-    api_key: str
+    api_key: str,
+    sample_image: bytes = None
 ) -> dict:
-    """使用定量目标感知的 AI 进行分析"""
+    """使用定量目标感知的 AI 进行分析（支持图像输入）"""
     try:
         genai.configure(api_key=api_key)
         
@@ -464,7 +473,17 @@ def analyze_with_ai(
         
         target_str = "\n".join(target_descriptions) if target_descriptions else "（用户未设定具体目标）"
         
+        # 判断是否有图像
+        has_image = sample_image is not None
+        
         # 构建 System Prompt
+        image_instruction = ""
+        if has_image:
+            image_instruction = """
+5. 仔细观察用户上传的样品微观结构图（如 SEM/光学显微镜图像）
+6. 分析图像中的形貌特征（晶粒大小、裂纹、孔隙、颜色异常等）
+7. 将图像观察与实验参数关联，推断工艺-形貌-性能的因果关系"""
+        
         system_prompt = f"""你是一位世界顶级的材料科学家和工艺工程师。
 
 用户正在进行【{material_name if material_name else '材料'}】的研究。
@@ -475,12 +494,57 @@ def analyze_with_ai(
 1. 精确指出当前数据与目标值的差距
 2. 结合物理/化学原理解释瓶颈
 3. 给出能够逼近目标值的具体参数建议
-4. 如果目标不切实际，诚实指出"""
+4. 如果目标不切实际，诚实指出{image_instruction}"""
 
         # 构建 User Prompt
         input_cols_str = ', '.join(input_cols) if input_cols else '（用户未指定）'
         
-        user_prompt = f"""## 实验数据
+        # 根据是否有图像调整 prompt 结构
+        if has_image:
+            user_prompt = f"""## 实验数据
+```csv
+{data_csv}
+```
+
+## 数据列说明
+- **实验参数列 (可调变量)**：{input_cols_str}
+
+## 用户的量化目标
+{target_str}
+
+## 样品图像
+用户上传了一张样品的微观结构图（SEM/光学显微镜图像）。请仔细观察图像中的形貌特征。
+
+---
+
+请按以下结构分析：
+
+### 一、图像形貌分析
+观察上传的样品图像：
+1. 描述图像中观察到的主要形貌特征（晶粒、表面、缺陷等）
+2. 是否存在裂纹、孔隙、颜色不均匀等异常？
+3. 这些形貌特征对应的可能原因是什么？
+
+### 二、数据-图像关联分析
+结合实验数据和图像观察：
+1. 图像中的形貌异常是否对应特定的参数区间？
+2. 哪些参数最可能影响了观察到的微观结构？
+3. 当前距离目标还有多大差距？
+
+### 三、瓶颈机理分析
+结合【{material_name}】的物理/化学原理：
+1. 什么因素导致了图像中观察到的问题？
+2. 当前工艺的主要限制是什么？
+
+### 四、精准参数建议
+为了改善微观结构并逼近目标值，建议下一次实验采用：
+（请给出每个参数的具体数值，并解释如何改善形貌）
+
+### 五、预期效果评估
+1. 按照建议调整后，微观结构预计如何改善？
+2. 各指标预计可以达到多少？"""
+        else:
+            user_prompt = f"""## 实验数据
 ```csv
 {data_csv}
 ```
@@ -515,8 +579,15 @@ def analyze_with_ai(
 2. 距离目标还有多少差距？
 3. 是否需要多轮迭代？"""
 
+        # 创建模型并生成响应
         model = genai.GenerativeModel('gemini-2.0-flash', system_instruction=system_prompt)
-        response = model.generate_content(user_prompt)
+        
+        if has_image:
+            # 使用 Vision 模型处理图像
+            image = Image.open(io.BytesIO(sample_image))
+            response = model.generate_content([user_prompt, image])
+        else:
+            response = model.generate_content(user_prompt)
         
         full_response = response.text
         
@@ -524,10 +595,13 @@ def analyze_with_ai(
         analysis_part = ""
         suggestion_part = ""
         
-        if "### 三" in full_response:
-            parts = full_response.split("### 三")
+        # 根据是否有图像选择分割点
+        split_marker = "### 四" if has_image else "### 三"
+        
+        if split_marker in full_response:
+            parts = full_response.split(split_marker)
             analysis_part = parts[0].strip()
-            suggestion_part = "### 三" + parts[1] if len(parts) > 1 else ""
+            suggestion_part = split_marker + parts[1] if len(parts) > 1 else ""
         else:
             analysis_part = full_response
         
@@ -535,7 +609,8 @@ def analyze_with_ai(
             'success': True,
             'analysis': analysis_part,
             'suggestions': suggestion_part,
-            'full_response': full_response
+            'full_response': full_response,
+            'has_image': has_image
         }
         
     except Exception as e:
@@ -596,23 +671,59 @@ def render_data_studio():
         st.session_state['experiment_data'],
         num_rows="dynamic",
         use_container_width=True,
-        height=350,
+        height=320,
         key="data_studio_editor"
     )
     
-    # 添加列功能
-    with st.expander("添加新列"):
-        col_add1, col_add2, col_add3 = st.columns([2, 1, 1])
-        with col_add1:
-            new_col_name = st.text_input("新列名称", placeholder="例如：催化剂浓度", key="new_col_name")
-        with col_add2:
-            new_col_default = st.number_input("默认值", value=0.0, key="new_col_default")
-        with col_add3:
-            st.markdown("<br>", unsafe_allow_html=True)
-            if st.button("添加列", key="add_col_btn"):
-                if new_col_name and new_col_name not in edited_df.columns:
-                    edited_df[new_col_name] = new_col_default
-                    st.session_state['experiment_data'] = edited_df
+    # 添加列功能和图片上传 - 并排显示
+    col_expand1, col_expand2 = st.columns(2)
+    
+    with col_expand1:
+        with st.expander("添加新列"):
+            col_add1, col_add2, col_add3 = st.columns([2, 1, 1])
+            with col_add1:
+                new_col_name = st.text_input("新列名称", placeholder="例如：催化剂浓度", key="new_col_name")
+            with col_add2:
+                new_col_default = st.number_input("默认值", value=0.0, key="new_col_default")
+            with col_add3:
+                st.markdown("<br>", unsafe_allow_html=True)
+                if st.button("添加列", key="add_col_btn"):
+                    if new_col_name and new_col_name not in edited_df.columns:
+                        edited_df[new_col_name] = new_col_default
+                        st.session_state['experiment_data'] = edited_df
+                        st.rerun()
+    
+    with col_expand2:
+        with st.expander("上传样品图片（可选）"):
+            st.markdown("""
+            <div style="font-size: 0.85rem; color: #666; margin-bottom: 0.5rem;">
+                上传 SEM、光学显微镜等微观结构图片，AI 将结合图像进行形貌分析
+            </div>
+            """, unsafe_allow_html=True)
+            
+            uploaded_image = st.file_uploader(
+                "选择图片文件",
+                type=['png', 'jpg', 'jpeg'],
+                key="sample_image_uploader",
+                label_visibility="collapsed"
+            )
+            
+            if uploaded_image is not None:
+                # 显示图片预览
+                image = Image.open(uploaded_image)
+                st.image(image, caption=f"已上传: {uploaded_image.name}", use_container_width=True)
+                
+                # 保存到临时变量（在保存时才写入 session_state）
+                st.session_state['_temp_image'] = uploaded_image.getvalue()
+                st.session_state['_temp_image_name'] = uploaded_image.name
+            elif st.session_state.get('sample_image') is not None:
+                # 显示已保存的图片
+                image = Image.open(io.BytesIO(st.session_state['sample_image']))
+                st.image(image, caption=f"已保存: {st.session_state.get('sample_image_name', '样品图片')}", use_container_width=True)
+                
+                if st.button("移除图片", key="remove_image_btn"):
+                    st.session_state['sample_image'] = None
+                    st.session_state['sample_image_name'] = None
                     st.rerun()
     
     # 分隔线
@@ -717,6 +828,16 @@ def render_data_studio():
             st.session_state['input_columns'] = input_columns
             st.session_state['output_columns'] = output_columns
             st.session_state['target_values'] = target_values
+            
+            # 保存图片（如果有新上传的）
+            if st.session_state.get('_temp_image') is not None:
+                st.session_state['sample_image'] = st.session_state['_temp_image']
+                st.session_state['sample_image_name'] = st.session_state.get('_temp_image_name', '样品图片')
+                # 清理临时变量
+                del st.session_state['_temp_image']
+                if '_temp_image_name' in st.session_state:
+                    del st.session_state['_temp_image_name']
+            
             st.session_state['current_view'] = 'dashboard'
             st.rerun()
 
@@ -806,7 +927,10 @@ def render_dashboard():
         elif df.empty:
             st.warning("请先添加实验数据")
         else:
-            with st.spinner("AI 正在分析目标差距并生成优化建议..."):
+            sample_image = st.session_state.get('sample_image')
+            spinner_text = "AI 正在分析数据、图像与目标差距..." if sample_image else "AI 正在分析目标差距并生成优化建议..."
+            
+            with st.spinner(spinner_text):
                 result = analyze_with_ai(
                     df,
                     st.session_state.get('material_name', ''),
@@ -814,7 +938,8 @@ def render_dashboard():
                     st.session_state.get('input_columns', []),
                     st.session_state.get('output_columns', []),
                     st.session_state.get('target_values', {}),
-                    api_key
+                    api_key,
+                    sample_image  # 传入图片
                 )
             st.session_state['ai_result'] = result
     
@@ -822,6 +947,8 @@ def render_dashboard():
     
     # 数据摘要
     input_cols = st.session_state.get('input_columns', [])
+    sample_image = st.session_state.get('sample_image')
+    image_status = "已上传" if sample_image else "无"
     
     st.markdown(f"""
     <div class="data-summary">
@@ -841,11 +968,19 @@ def render_dashboard():
             <span class="summary-label">已设目标</span><br>
             <span class="summary-value">{len([v for v in target_values.values() if v])}</span>
         </span>
+        <span class="summary-item">
+            <span class="summary-label">样品图片</span><br>
+            <span class="summary-value" style="color: {'#10b981' if sample_image else '#999'};">{image_status}</span>
+        </span>
     </div>
     """, unsafe_allow_html=True)
     
-    # 数据表格和图表
-    col_table, col_chart = st.columns([1, 1])
+    # 数据表格、图表和图片预览
+    if sample_image:
+        col_table, col_chart, col_image = st.columns([1, 1, 0.8])
+    else:
+        col_table, col_chart = st.columns([1, 1])
+        col_image = None
     
     with col_table:
         st.markdown("**实验数据预览**")
@@ -856,6 +991,13 @@ def render_dashboard():
         fig = create_trend_chart(df, output_cols, target_values)
         st.plotly_chart(fig, use_container_width=True)
     
+    # 显示样品图片预览
+    if col_image is not None and sample_image:
+        with col_image:
+            st.markdown("**样品图片**")
+            image = Image.open(io.BytesIO(sample_image))
+            st.image(image, caption=st.session_state.get('sample_image_name', ''), use_container_width=True)
+    
     # AI 分析结果
     ai_result = st.session_state.get('ai_result')
     
@@ -863,20 +1005,25 @@ def render_dashboard():
         st.markdown("<div style='height: 1rem;'></div>", unsafe_allow_html=True)
         
         if ai_result.get('success'):
+            # 根据是否有图像分析调整标题
+            has_image_analysis = ai_result.get('has_image', False)
+            insight_title = "图像形貌与数据关联分析" if has_image_analysis else "目标差距诊断与机理分析"
+            action_title = "形貌改善与参数建议" if has_image_analysis else "精准参数建议与预期效果"
+            
             col_insight, col_action = st.columns([1, 1])
             
             with col_insight:
-                st.markdown("""
+                st.markdown(f"""
                 <div class="insight-card">
-                    <div class="insight-title">目标差距诊断与机理分析</div>
+                    <div class="insight-title">{insight_title}</div>
                 </div>
                 """, unsafe_allow_html=True)
                 st.markdown(ai_result.get('analysis', ''))
             
             with col_action:
-                st.markdown("""
+                st.markdown(f"""
                 <div class="action-card">
-                    <div class="action-title">精准参数建议与预期效果</div>
+                    <div class="action-title">{action_title}</div>
                 </div>
                 """, unsafe_allow_html=True)
                 st.markdown(ai_result.get('suggestions', ai_result.get('full_response', '')))
