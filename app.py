@@ -7,6 +7,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
+import plotly.express as px
 import google.generativeai as genai
 from PIL import Image
 import io
@@ -837,6 +838,124 @@ def render_data_studio():
 
 
 # ============================================================
+# Visual Analytics Module
+# ============================================================
+def _render_visual_analytics(df: pd.DataFrame):
+    """散点图 + 相关性热力图，放在 Dashboard 的表格下方、AI 报告上方。"""
+    if df.empty or len(df.columns) < 2:
+        return
+
+    # 筛选数值列
+    num_cols = df.select_dtypes(include="number").columns.tolist()
+    if len(num_cols) < 2:
+        return
+
+    all_cols = df.columns.tolist()
+
+    with st.expander("可视化分析 (Visual Analytics)", expanded=True):
+
+        # ---- 交互控件: X / Y / Color ----
+        ctrl1, ctrl2, ctrl3 = st.columns(3)
+        with ctrl1:
+            x_col = st.selectbox(
+                "X 轴", num_cols,
+                index=0,
+                key="va_x",
+            )
+        with ctrl2:
+            y_default = min(len(num_cols) - 1, max(0, len(num_cols) - 1))
+            y_col = st.selectbox(
+                "Y 轴", num_cols,
+                index=y_default,
+                key="va_y",
+            )
+        with ctrl3:
+            color_options = ["(无)"] + all_cols
+            color_sel = st.selectbox(
+                "颜色映射 (可选)", color_options,
+                index=0,
+                key="va_color",
+            )
+
+        color_arg = color_sel if color_sel != "(无)" else None
+
+        # ---- 散点图 + 趋势线 ----
+        try:
+            scatter_kwargs = dict(
+                data_frame=df, x=x_col, y=y_col,
+                color=color_arg,
+                color_continuous_scale="Blues",
+                template="simple_white",
+                title=f"{y_col}  vs  {x_col}",
+            )
+            # OLS 趋势线需要 statsmodels；缺失时降级为无趋势线
+            try:
+                import statsmodels  # noqa: F401
+                scatter_kwargs["trendline"] = "ols"
+            except ImportError:
+                pass
+
+            fig_scatter = px.scatter(**scatter_kwargs)
+            fig_scatter.update_traces(
+                marker=dict(size=9, line=dict(width=1, color="#FFFFFF")),
+            )
+            fig_scatter.update_layout(
+                height=380,
+                margin=dict(t=50, b=40, l=50, r=30),
+                xaxis=dict(gridcolor="#F0F0F0"),
+                yaxis=dict(gridcolor="#F0F0F0"),
+                font=dict(color="#333"),
+                plot_bgcolor="#FFFFFF",
+                paper_bgcolor="#FFFFFF",
+            )
+            # 趋势线颜色统一为强调蓝
+            for trace in fig_scatter.data:
+                if hasattr(trace, "mode") and trace.mode == "lines":
+                    trace.line.color = ACCENT
+
+            st.plotly_chart(fig_scatter, width="stretch")
+        except Exception as exc:
+            st.warning(f"散点图绘制失败: {exc}")
+
+        # ---- 相关性热力图 ----
+        if len(num_cols) >= 2:
+            st.markdown("**参数相关性热力图 (Correlation Heatmap)**")
+            corr = df[num_cols].corr()
+
+            fig_heatmap = go.Figure(data=go.Heatmap(
+                z=corr.values,
+                x=corr.columns.tolist(),
+                y=corr.index.tolist(),
+                colorscale=[
+                    [0.0, "#F0F7FF"],
+                    [0.5, "#7ABAFF"],
+                    [1.0, "#005CBF"],
+                ],
+                zmin=-1, zmax=1,
+                text=corr.round(2).values,
+                texttemplate="%{text}",
+                textfont=dict(size=12, color="#333"),
+                hovertemplate="(%{x}, %{y}): %{z:.3f}<extra></extra>",
+                colorbar=dict(title="r"),
+            ))
+            fig_heatmap.update_layout(
+                height=max(320, 50 * len(num_cols)),
+                margin=dict(t=30, b=30, l=80, r=30),
+                xaxis=dict(tickangle=-40),
+                plot_bgcolor="#FFFFFF",
+                paper_bgcolor="#FFFFFF",
+                font=dict(color="#333"),
+            )
+            st.plotly_chart(fig_heatmap, width="stretch")
+
+        st.caption(
+            "提示: 散点图展示双变量关系 (含 OLS 趋势线, 需安装 statsmodels); "
+            "热力图展示所有数值列之间的 Pearson 相关系数, "
+            "绝对值越接近 1 表示线性相关性越强。"
+        )
+
+
+# ============================================================
 # Tab: 智能仪表盘 (Dashboard)
 # ============================================================
 def render_dashboard():
@@ -980,6 +1099,9 @@ def render_dashboard():
                 caption=st.session_state.get("sample_image_name", ""),
                 width="stretch",
             )
+
+    # ---- 可视化分析 (Visual Analytics) ----
+    _render_visual_analytics(df)
 
     # ---- AI 分析结果 ----
     ai_result = st.session_state.get("ai_result")
