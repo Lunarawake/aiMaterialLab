@@ -31,7 +31,7 @@ st.set_page_config(
     page_title="NEXUS Lab",
     page_icon="🧪",
     layout="wide",
-    initial_sidebar_state="collapsed",
+    initial_sidebar_state="expanded",
 )
 
 
@@ -40,11 +40,15 @@ st.set_page_config(
 # ============================================================
 st.markdown("""
 <style>
-    /* === 强制隐藏 Streamlit 原生 UI 元素 === */
+    /* === 强制隐藏 Streamlit 原生 UI 元素（保留侧边栏 Toggle）=== */
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
-    header {visibility: hidden !important; height: 0 !important; min-height: 0 !important; padding: 0 !important; margin: 0 !important; overflow: hidden !important;}
+    header[data-testid="stHeader"] {visibility: hidden !important; height: 0 !important; min-height: 0 !important; padding: 0 !important; margin: 0 !important; overflow: hidden !important;}
     .stDeployButton {display: none !important;}
+
+    /* === 侧边栏层级保护 === */
+    section[data-testid="stSidebar"] {z-index: 999999 !important;}
+    button[data-testid="stSidebarCollapseButton"] {z-index: 999999 !important;}
 
     /* === 全局 === */
     .stApp {background-color: #FFFFFF;}
@@ -494,11 +498,11 @@ def render_navbar():
     _, nav_popover = st.columns([6, 1])
     with nav_popover:
         popover_label = "👨‍🔬 Admin" if is_admin else "👤 Guest"
-        with st.popover(popover_label, use_container_width=True):
+        with st.popover(popover_label, width="stretch"):
             if is_admin:
                 st.markdown("✅ 已登录为 **Admin**")
                 st.caption("拥有 Google Sheets 云端同步权限")
-                if st.button("退出登录", key="logout_btn", use_container_width=True):
+                if st.button("退出登录", key="logout_btn", width="stretch"):
                     st.session_state["user_role"] = "guest"
                     st.rerun()
             else:
@@ -508,7 +512,7 @@ def render_navbar():
                     "密码", type="password", key="login_pwd",
                     placeholder="输入管理密码",
                 )
-                if st.button("登录", key="login_btn", use_container_width=True):
+                if st.button("登录", key="login_btn", width="stretch"):
                     try:
                         correct = st.secrets["general"]["password"]
                         if pwd == correct:
@@ -524,26 +528,29 @@ def render_navbar():
 
 
 # ============================================================
-# 侧边栏 — 数据存取 (所有人可用 + Admin 专属)
+# 侧边栏 — 项目控制台 (所有人可用 + Admin 专属)
 # ============================================================
 def render_sidebar():
-    """Sidebar: CSV 上传/下载（全部可用）+ Google Sheets（仅 Admin）。"""
-    is_admin = st.session_state.get("user_role") == "admin"
+    """Sidebar: 项目控制台 — 本地备份 + 云端同步。"""
     df = st.session_state["df"]
 
     with st.sidebar:
-        st.markdown("### 📁 数据管理")
+        st.header("🗂️ 项目控制台")
         st.caption(f"当前数据：{len(df)} 行 × {len(df.columns)} 列")
 
-        # ---- 📥 下载 CSV 备份 (所有人) ----
+        # =============================================
+        # 1. 所有人可见：本地备份
+        # =============================================
+        st.subheader("📦 本地备份")
+
+        # 下载 CSV
         csv_bytes = df.to_csv(index=False).encode("utf-8")
         st.download_button(
             "📥 下载 CSV 备份", csv_bytes, "nexus_backup.csv",
-            "text/csv", use_container_width=True,
+            "text/csv", width="stretch",
         )
 
-        # ---- 📂 上传 CSV 恢复 (所有人) ----
-        st.markdown("---")
+        # 上传 CSV
         uploaded = st.file_uploader(
             "📂 上传 CSV 恢复", type=["csv"], key="csv_uploader",
         )
@@ -553,7 +560,6 @@ def render_sidebar():
                 st.info(f"检测到 {len(preview_df)} 行 × {len(preview_df.columns)} 列")
                 if st.button("✅ 确认导入此文件", key="confirm_csv_import"):
                     st.session_state["df"] = preview_df
-                    # 重置映射（列可能完全不同了）
                     st.session_state["input_columns"] = []
                     st.session_state["output_columns"] = []
                     st.session_state["target_values"] = {}
@@ -562,53 +568,60 @@ def render_sidebar():
             except Exception as e:
                 st.error(f"CSV 解析失败: {e}")
 
-        # ---- ☁️ Google Sheets 云端同步 (仅 Admin) ----
-        if is_admin:
-            st.markdown("---")
-            st.markdown("### ☁️ 云端同步")
+        # =============================================
+        # 2. 全员可见，权限熔断：云端同步
+        # =============================================
+        st.divider()
+        st.subheader("☁️ 云端数据库 (Google Sheets)")
 
-            if not GSHEETS_AVAILABLE:
-                st.warning(
-                    "未安装 `streamlit-gsheets`。\n\n"
-                    "运行 `pip install streamlit-gsheets` 后重启。"
-                )
-            else:
-                # 加载（不指定 worksheet 名称，自动读取第一个工作表）
-                if st.button(
-                    "☁️ 从 Google Sheets 加载",
-                    use_container_width=True, key="gs_load",
-                ):
+        is_admin = st.session_state.get("user_role") == "admin"
+        if is_admin:
+            st.caption("✅ 管理员已登录 — 云端功能已解锁")
+        else:
+            st.caption("🔒 游客模式 — 点击按钮后需登录")
+
+        if not GSHEETS_AVAILABLE:
+            st.warning(
+                "未安装 `st-gsheets-connection`。\n\n"
+                "运行 `pip install st-gsheets-connection` 后重启。"
+            )
+        else:
+            # 按钮 1: 从云端加载（全员可见）
+            if st.button("📥 从云端加载", width="stretch", key="gs_load"):
+                if not is_admin:
+                    st.error("🔒 权限受限：这是管理员功能。请点击右上角登录后使用。")
+                else:
                     try:
                         conn = st.connection("gsheets", type=GSheetsConnection)
-                        cloud_df = conn.read(ttl=0)
-                        cloud_df = cloud_df.dropna(how="all")
-                        if cloud_df.empty:
+                        df_cloud = conn.read()
+                        df_cloud = df_cloud.dropna(how="all")
+                        if df_cloud.empty:
                             st.warning("云端工作表为空或无法读取。请确认表中有数据。")
                         else:
-                            st.session_state["df"] = cloud_df
+                            st.session_state["df"] = df_cloud
                             st.session_state["input_columns"] = []
                             st.session_state["output_columns"] = []
                             st.session_state["target_values"] = {}
                             _clear_editor_widget()
-                            st.success(f"✅ 已从云端加载 {len(cloud_df)} 行 × {len(cloud_df.columns)} 列")
+                            st.success(f"✅ 已同步云端最新数据！({len(df_cloud)} 行 × {len(df_cloud.columns)} 列)")
                             st.rerun()
                     except Exception as e:
-                        st.error(f"加载失败。错误详情: {str(e)}")
+                        st.error(f"加载失败: {str(e)}")
 
-                # 保存（不指定 worksheet 名称，自动写入第一个工作表）
-                if st.button(
-                    "💾 保存到 Google Sheets",
-                    use_container_width=True, key="gs_save",
-                ):
+            # 按钮 2: 保存到云端（全员可见）
+            if st.button("💾 保存到云端", width="stretch", key="gs_save"):
+                if not is_admin:
+                    st.error("🔒 权限受限：这是管理员功能。请点击右上角登录后使用。")
+                else:
                     try:
                         conn = st.connection("gsheets", type=GSheetsConnection)
-                        conn.update(data=df)
-                        st.success("✅ 已同步至云端！")
+                        conn.update(data=st.session_state["df"])
+                        st.success("✅ 保存成功！Google Sheets 已更新。")
                     except Exception as e:
-                        st.error(
-                            f"保存失败。错误详情: {str(e)}\n\n"
-                            f"常见原因: 403=服务账号无编辑权限, "
-                            f"404=找不到工作表, 网络超时等。"
+                        st.error(f"保存失败: {str(e)}")
+                        st.markdown(
+                            "💡 **排查建议**: 请检查 Google Sheet 是否已分享给 "
+                            "Service Account 邮箱，并赋予 **Editor** 权限。"
                         )
 
 
@@ -720,7 +733,7 @@ def render_data_studio():
     edited_df = st.data_editor(
         st.session_state["df"],
         num_rows="dynamic",
-        use_container_width=True,
+        width="stretch",
         height=360,
         key="editor",
     )
@@ -762,7 +775,7 @@ def render_data_studio():
             )
             if up_img is not None:
                 img = Image.open(up_img)
-                st.image(img, caption=f"已上传: {up_img.name}", use_container_width=True)
+                st.image(img, caption=f"已上传: {up_img.name}", width="stretch")
                 st.session_state["sample_image"] = up_img.getvalue()
                 st.session_state["sample_image_name"] = up_img.name
             elif st.session_state.get("sample_image"):
@@ -770,7 +783,7 @@ def render_data_studio():
                 st.image(
                     img,
                     caption=f"已保存: {st.session_state.get('sample_image_name', '')}",
-                    use_container_width=True,
+                    width="stretch",
                 )
                 if st.button("移除图片", key="rm_img_btn"):
                     st.session_state["sample_image"] = None
@@ -922,7 +935,7 @@ def render_dashboard():
     bc1, bc2, bc3 = st.columns([1, 1, 2])
     with bc1:
         analyze_btn = st.button(
-            "🔬 AI 深度分析", use_container_width=True, type="primary",
+            "🔬 AI 深度分析", width="stretch", type="primary",
         )
     with bc2:
         pass  # 占位
@@ -1001,15 +1014,15 @@ def render_dashboard():
         if inp or out:
             st.dataframe(
                 style_dataframe(df, inp, out),
-                use_container_width=True, height=280,
+                width="stretch", height=280,
             )
         else:
-            st.dataframe(df, use_container_width=True, height=280)
+            st.dataframe(df, width="stretch", height=280)
 
     with col_chart:
         st.markdown("**结果趋势与目标**")
         st.plotly_chart(
-            create_trend_chart(df, out, tvs), use_container_width=True,
+            create_trend_chart(df, out, tvs), width="stretch",
         )
 
     if col_img is not None and img_bytes:
@@ -1018,7 +1031,7 @@ def render_dashboard():
             st.image(
                 Image.open(io.BytesIO(img_bytes)),
                 caption=st.session_state.get("sample_image_name", ""),
-                use_container_width=True,
+                width="stretch",
             )
 
     # ---- AI 分析结果 ----
