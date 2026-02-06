@@ -40,9 +40,11 @@ st.set_page_config(
 # ============================================================
 st.markdown("""
 <style>
-    /* === 隐藏 Streamlit 默认 Hamburger 菜单 & Footer === */
+    /* === 强制隐藏 Streamlit 原生 UI 元素 === */
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
+    header {visibility: hidden !important; height: 0 !important; min-height: 0 !important; padding: 0 !important; margin: 0 !important; overflow: hidden !important;}
+    .stDeployButton {display: none !important;}
 
     /* === 全局 === */
     .stApp {background-color: #FFFFFF;}
@@ -52,7 +54,25 @@ st.markdown("""
         color: #333;
     }
 
-    /* === Navbar === */
+    /* === Navbar 固定顶栏 === */
+    .nexus-navbar {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        z-index: 99999;
+        background: #FFFFFF;
+        border-bottom: 1px solid #e8e8e8;
+        box-shadow: 0 1px 6px rgba(0,0,0,0.06);
+        padding: 10px 2.5rem;
+        box-sizing: border-box;
+    }
+    .nexus-navbar-inner {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        max-width: 100%;
+    }
     .navbar-logo {
         font-size: 1.35rem;
         font-weight: 700;
@@ -72,6 +92,9 @@ st.markdown("""
     }
     .badge-guest  {background: #f1f5f9; color: #64748b;}
     .badge-admin  {background: #dbeafe; color: #1d4ed8;}
+
+    /* === Popover 最小宽度 === */
+    [data-testid="stPopover"] > div {min-width: 260px;}
 
     /* === 区域标题 === */
     .area-title {
@@ -173,8 +196,13 @@ st.markdown("""
         padding: 1.5rem 0; border-top: 1px solid #e8e8e8; margin-top: 1.5rem;
     }
 
-    /* === 间距 === */
-    .block-container {padding: 1rem 2.5rem 2rem 2.5rem;}
+    /* === 间距 — 顶部留出空间给固定 Navbar === */
+    .main .block-container {
+        padding-top: 80px !important;
+        padding-left: 2.5rem;
+        padding-right: 2.5rem;
+        padding-bottom: 2rem;
+    }
 
     /* === 输入框 === */
     .stTextInput > div > div > input,
@@ -441,7 +469,7 @@ def analyze_with_ai(
 # 顶部导航栏 (Navbar)
 # ============================================================
 def render_navbar():
-    """Logo + Popover 用户中心（登录/登出）。"""
+    """固定顶栏: 纯 HTML Logo + Streamlit Popover 用户中心。"""
     role = st.session_state.get("user_role", "guest")
     is_admin = role == "admin"
 
@@ -451,17 +479,20 @@ def render_navbar():
         else '<span class="navbar-badge badge-guest">Guest</span>'
     )
 
-    nav_left, _, nav_right = st.columns([5, 3, 1.5])
+    # ---- 固定 HTML 导航栏（纯展示层，永远在最顶部）----
+    st.markdown(
+        f'<div class="nexus-navbar">'
+        f'  <div class="nexus-navbar-inner">'
+        f'    <div class="navbar-logo">🧪 <span class="accent">NEXUS</span> Lab {badge_html}</div>'
+        f'    <div style="font-size:0.8rem; color:#888;">点击右侧 ▼ 管理身份</div>'
+        f'  </div>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
 
-    with nav_left:
-        st.markdown(
-            f'<div class="navbar-logo">'
-            f'🧪 <span class="accent">NEXUS</span> Lab {badge_html}'
-            f'</div>',
-            unsafe_allow_html=True,
-        )
-
-    with nav_right:
+    # ---- Popover 交互区（在主内容流中，位于固定栏下方）----
+    _, nav_popover = st.columns([6, 1])
+    with nav_popover:
         popover_label = "👨‍🔬 Admin" if is_admin else "👤 Guest"
         with st.popover(popover_label, use_container_width=True):
             if is_admin:
@@ -485,17 +516,11 @@ def render_navbar():
                             st.rerun()
                         else:
                             st.error("密码错误")
-                    except (KeyError, FileNotFoundError):
-                        st.error(
+                    except Exception:
+                        st.warning(
                             "未配置管理密码。请在 `.streamlit/secrets.toml` 中添加：\n\n"
-                            '```\n[general]\npassword = "your_password"\n```'
+                            '```toml\n[general]\npassword = "your_password"\n```'
                         )
-
-    # Navbar 底部分割线
-    st.markdown(
-        '<hr style="margin:0 0 0.6rem 0; border:none; border-top:1px solid #e8e8e8;">',
-        unsafe_allow_html=True,
-    )
 
 
 # ============================================================
@@ -548,39 +573,43 @@ def render_sidebar():
                     "运行 `pip install streamlit-gsheets` 后重启。"
                 )
             else:
-                # 加载
+                # 加载（不指定 worksheet 名称，自动读取第一个工作表）
                 if st.button(
                     "☁️ 从 Google Sheets 加载",
                     use_container_width=True, key="gs_load",
                 ):
                     try:
                         conn = st.connection("gsheets", type=GSheetsConnection)
-                        cloud_df = conn.read(worksheet="Sheet1", ttl=0)
+                        cloud_df = conn.read(ttl=0)
                         cloud_df = cloud_df.dropna(how="all")
                         if cloud_df.empty:
-                            st.warning("Sheet1 为空或无法读取。")
+                            st.warning("云端工作表为空或无法读取。请确认表中有数据。")
                         else:
                             st.session_state["df"] = cloud_df
                             st.session_state["input_columns"] = []
                             st.session_state["output_columns"] = []
                             st.session_state["target_values"] = {}
                             _clear_editor_widget()
-                            st.success(f"已加载 {len(cloud_df)} 行 × {len(cloud_df.columns)} 列")
+                            st.success(f"✅ 已从云端加载 {len(cloud_df)} 行 × {len(cloud_df.columns)} 列")
                             st.rerun()
                     except Exception as e:
-                        st.error(f"加载失败: {e}")
+                        st.error(f"加载失败。错误详情: {str(e)}")
 
-                # 保存
+                # 保存（不指定 worksheet 名称，自动写入第一个工作表）
                 if st.button(
                     "💾 保存到 Google Sheets",
                     use_container_width=True, key="gs_save",
                 ):
                     try:
                         conn = st.connection("gsheets", type=GSheetsConnection)
-                        conn.update(worksheet="Sheet1", data=df)
-                        st.success("✓ 已保存到 Google Sheets")
+                        conn.update(data=df)
+                        st.success("✅ 已同步至云端！")
                     except Exception as e:
-                        st.error(f"保存失败: {e}")
+                        st.error(
+                            f"保存失败。错误详情: {str(e)}\n\n"
+                            f"常见原因: 403=服务账号无编辑权限, "
+                            f"404=找不到工作表, 网络超时等。"
+                        )
 
 
 # ============================================================
