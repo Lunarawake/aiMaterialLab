@@ -607,7 +607,85 @@ def render_data_studio():
                 _clear_editor_widget()
                 st.rerun()
 
-    st.caption("注: 由于组件限制，请在此处管理列结构，在下方表格编辑数据。")
+    # ---- 公式计算列 (第二行工具栏) ----
+    st.markdown(
+        '<hr style="border:none; border-top:1px solid #E8E8E8; margin:0.6rem 0;">',
+        unsafe_allow_html=True,
+    )
+    fc1, fc2, fc3 = st.columns([2, 4, 1])
+    with fc1:
+        st.caption("公式计算列")
+        formula_col_name = st.text_input(
+            "新列名", key="formula_col_name", placeholder="例如: 密度",
+            label_visibility="collapsed",
+        )
+    with fc2:
+        st.caption("计算公式 (用反引号包裹列名)")
+        formula_expr = st.text_input(
+            "公式", key="formula_expr",
+            placeholder="例如: `生长速率(um/h)` / `微管密度(cm-2)`",
+            label_visibility="collapsed",
+        )
+    with fc3:
+        st.caption(" ")  # 对齐占位
+        calc_btn = st.button("计算并添加", key="calc_col_btn", type="primary")
+
+    if calc_btn:
+        f_name = (formula_col_name or "").strip()
+        f_expr = (formula_expr or "").strip()
+        if not f_name:
+            st.error("请输入新列名。")
+        elif not f_expr:
+            st.error("请输入计算公式。")
+        elif f_name in df.columns:
+            st.error(f"列 \"{f_name}\" 已存在，请使用其他名称。")
+        else:
+            try:
+                # 方案 1: 直接用 pandas eval (支持反引号包裹的列名)
+                result = df.eval(f_expr)
+                new_df = df.copy()
+                new_df[f_name] = result
+                st.session_state["df"] = new_df
+                _clear_editor_widget()
+                st.rerun()
+            except Exception as e1:
+                # 方案 2: 将列名映射为安全别名后再 eval
+                try:
+                    alias_map = {
+                        col: f"_c{i}_" for i, col in enumerate(df.columns)
+                    }
+                    reverse_map = {v: k for k, v in alias_map.items()}
+                    safe_df = df.rename(columns=alias_map)
+
+                    safe_expr = f_expr
+                    # 按列名长度从长到短替换，避免子串冲突
+                    for col in sorted(
+                        df.columns, key=len, reverse=True
+                    ):
+                        safe_expr = safe_expr.replace(
+                            f"`{col}`", alias_map[col]
+                        )
+
+                    result = safe_df.eval(safe_expr)
+                    new_df = df.copy()
+                    new_df[f_name] = result
+                    st.session_state["df"] = new_df
+                    _clear_editor_widget()
+                    st.rerun()
+                except Exception:
+                    st.error(
+                        f"公式计算失败: {e1}\n\n"
+                        f"**正确格式示例:**\n"
+                        f"- `` `列A` + `列B` ``\n"
+                        f"- `` `列A` / `列B` * 100 ``\n"
+                        f"- `` (`列A` - `列B`).abs() ``\n\n"
+                        f"当前可用列名: {', '.join(df.columns.tolist())}"
+                    )
+
+    st.caption(
+        "注: 在此处管理列结构, 在下方表格编辑数据。"
+        "公式中请用反引号 ` 包裹列名, 支持 +, -, *, / 及括号运算。"
+    )
 
     # ---- 数据存取区 (Data IO) ----
     with st.container(border=True):
