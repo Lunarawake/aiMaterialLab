@@ -25,13 +25,12 @@ except ImportError:
 # ============================================================
 # SQLite Local Database
 # ============================================================
-DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "research_data.db")
+DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "lab_storage.db")
 
 
 def _db_conn() -> sqlite3.Connection:
     """获取 SQLite 连接 (每次调用新建，避免跨线程问题)。"""
-    conn = sqlite3.connect(DB_PATH)
-    return conn
+    return sqlite3.connect(DB_PATH)
 
 
 def _db_init():
@@ -50,8 +49,20 @@ def _db_init():
         conn.close()
 
 
+def _clean_df(df: pd.DataFrame) -> pd.DataFrame:
+    """清洗 DataFrame: 删除全空行, 数值列 NaN->0, 文本列 NaN->空字符串。"""
+    df = df.dropna(how="all").reset_index(drop=True)
+    for col in df.columns:
+        if pd.api.types.is_numeric_dtype(df[col]):
+            df[col] = df[col].fillna(0)
+        else:
+            df[col] = df[col].fillna("")
+    return df
+
+
 def db_save(df: pd.DataFrame):
-    """将整个 DataFrame 以 JSON 形式写入 SQLite (覆盖式: 只保留最新一条)。"""
+    """清洗后将 DataFrame 以 JSON 写入 SQLite (覆盖式)。"""
+    df = _clean_df(df)
     conn = _db_conn()
     try:
         data_json = df.to_json(orient="split", force_ascii=False)
@@ -67,14 +78,17 @@ def db_save(df: pd.DataFrame):
 
 
 def db_load() -> pd.DataFrame | None:
-    """从 SQLite 读取最新保存的 DataFrame，无数据时返回 None。"""
+    """从 SQLite 读取最新 DataFrame，无数据时返回 None。"""
     conn = _db_conn()
     try:
         row = conn.execute(
             "SELECT data_json FROM experiment_logs ORDER BY id DESC LIMIT 1"
         ).fetchone()
         if row:
-            return pd.read_json(io.StringIO(row[0]), orient="split")
+            df = pd.read_json(io.StringIO(row[0]), orient="split")
+            if df.empty or len(df.columns) == 0:
+                return None
+            return df
         return None
     except Exception:
         return None
@@ -296,9 +310,9 @@ st.markdown(f"""
 # ============================================================
 # Session State
 # ============================================================
-def init_session_state():
-    # 尝试从 SQLite 恢复数据 (刷新页面时自动恢复)
-    _default_df = pd.DataFrame({
+def _get_sample_df() -> pd.DataFrame:
+    """最小示例数据，确保 DataFrame 至少有列名和一行数据。"""
+    return pd.DataFrame({
         "温度(C)":       [1800, 1850, 1900, 1950, 2000],
         "压力(mbar)":    [50,   55,   60,   65,   70],
         "Ar流量(sccm)":  [100,  100,  120,  120,  150],
@@ -307,8 +321,16 @@ def init_session_state():
         "微管密度(cm-2)": [5.2,  4.1,  2.8,  3.5,  4.0],
     })
 
+
+def init_session_state():
+    # 优先从本地 SQLite 恢复; 若为空则用示例数据兜底
     restored_df = db_load()
-    starting_df = restored_df if restored_df is not None else _default_df
+    if restored_df is not None and not restored_df.empty and len(restored_df.columns) > 0:
+        starting_df = restored_df
+    else:
+        starting_df = _get_sample_df()
+        # 将示例数据写入 SQLite, 防止下次启动仍为空
+        db_save(starting_df)
 
     defaults = {
         "user_role": "guest",
@@ -583,6 +605,81 @@ def render_navbar():
 def render_data_studio():
     df = st.session_state["df"]
 
+    # === 0. 云端同步控制台 (仅管理员可见, 置顶) ===
+    if st.session_state.get("user_role") == "admin" and GSHEETS_AVAILABLE:
+        with st.container(border=True):
+            st.caption("云端同步控制台 (管理员)")
+            sc1, sc2 = st.columns(2)
+
+            with sc1:
+                if st.button(
+                    "从云端拉取 (Pull)",
+                    width="stretch", key="gs_pull",
+                ):
+                    try:
+                        # 1. 清除所有缓存
+                        st.cache_data.clear()
+                        # 2. 从 Google Sheets 读取
+                        conn = st.connection(
+                            "gsheets", type=GSheetsConnection
+                        )
+                        df_cloud = conn.read()
+                        # 3. 数据清洗
+                        df_cloud = df_cloud.dropna(how="all").reset_index(drop=True)
+                        for col in df_cloud.columns:
+                            if pd.api.types.is_numeric_dtype(df_cloud[col]):
+                                df_cloud[col] = df_cloud[col].fillna(0)
+                            else:
+                                df_cloud[col] = df_cloud[col].fillna("")
+                        if df_cloud.empty or len(df_cloud.columns) == 0:
+                            st.warning("云端工作表为空, 未执行覆盖。")
+                        else:
+                            # 4. 覆盖本地 session + SQLite
+                            st.session_state["df"] = df_cloud
+                            st.session_state["input_columns"] = []
+                            st.session_state["output_columns"] = []
+                            st.session_state["target_values"] = {}
+                            db_save(df_cloud)
+                            _clear_editor_widget()
+                            st.success(
+                                f"已从云端拉取并覆盖本地 "
+                                f"({len(df_cloud)} 行 x "
+                                f"{len(df_cloud.columns)} 列)"
+                            )
+                            # 5. 强制重载
+                            st.rerun()
+                    except Exception as e:
+                        st.error(f"云端拉取失败: {str(e)}")
+
+            with sc2:
+                if st.button(
+                    "同步到云端 (Push)",
+                    width="stretch", key="gs_push", type="primary",
+                ):
+                    try:
+                        # 1. 先保存本地
+                        current_df = st.session_state["df"]
+                        db_save(current_df)
+                        # 2. 全量覆盖到 Google Sheets
+                        conn = st.connection(
+                            "gsheets", type=GSheetsConnection
+                        )
+                        conn.update(data=current_df)
+                        st.toast("云端同步已完成")
+                    except Exception as e:
+                        st.error(f"云端同步失败: {str(e)}")
+                        st.markdown(
+                            "**排查建议**: 请检查 Google Sheet 是否已"
+                            "分享给 Service Account 邮箱, 并赋予 "
+                            "**Editor** 权限。"
+                        )
+
+            st.caption(
+                "Pull = 云端数据覆盖本地 | "
+                "Push = 本地数据全量覆盖云端 | "
+                "日常编辑自动保存至本地数据库, 不依赖网络。"
+            )
+
     # === 1. 实验背景 ===
     st.markdown(
         '<div class="area-title"><span class="area-number">01</span> 实验背景</div>',
@@ -780,68 +877,8 @@ def render_data_studio():
         "公式中请用反引号 ` 包裹列名, 支持 +, -, *, / 及括号运算。"
     )
 
-    # ---- 数据存取区 (Data IO) ----
+    # ---- 本地文件存取 ----
     with st.container(border=True):
-
-        # 云端镜像备份 (仅管理员可见)
-        if st.session_state.get("user_role") == "admin" and GSHEETS_AVAILABLE:
-            st.caption("云端镜像备份 (管理员)")
-            gc1, gc2 = st.columns(2)
-            with gc1:
-                if st.button(
-                    "同步至云端镜像",
-                    width="stretch", key="gs_mirror", type="primary",
-                ):
-                    try:
-                        conn = st.connection(
-                            "gsheets", type=GSheetsConnection
-                        )
-                        conn.update(data=st.session_state["df"])
-                        st.success(
-                            "已将本地数据推送至 Google Sheets 云端镜像。"
-                        )
-                    except Exception as e:
-                        st.error(f"云端同步失败: {str(e)}")
-                        st.markdown(
-                            "**排查建议**: 请检查 Google Sheet 是否已"
-                            "分享给 Service Account 邮箱，并赋予 "
-                            "**Editor** 权限。"
-                        )
-            with gc2:
-                if st.button(
-                    "从云端镜像恢复",
-                    width="stretch", key="gs_restore",
-                ):
-                    try:
-                        conn = st.connection(
-                            "gsheets", type=GSheetsConnection
-                        )
-                        df_cloud = conn.read()
-                        df_cloud = df_cloud.dropna(how="all")
-                        if df_cloud.empty:
-                            st.warning("云端工作表为空或无法读取。")
-                        else:
-                            st.session_state["df"] = df_cloud
-                            st.session_state["input_columns"] = []
-                            st.session_state["output_columns"] = []
-                            st.session_state["target_values"] = {}
-                            db_save(df_cloud)
-                            _clear_editor_widget()
-                            st.success(
-                                f"已从云端恢复 "
-                                f"({len(df_cloud)} 行 x "
-                                f"{len(df_cloud.columns)} 列)"
-                            )
-                            st.rerun()
-                    except Exception as e:
-                        st.error(f"云端恢复失败: {str(e)}")
-            st.caption(
-                "提示: 日常编辑自动保存至本地数据库, "
-                "云端镜像仅在点击按钮时同步, 不会造成操作卡顿。"
-            )
-            st.divider()
-
-        # 本地文件存取 (所有人可见)
         st.caption("本地文件存取")
         lc1, lc2 = st.columns(2)
         with lc1:
