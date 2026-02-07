@@ -12,12 +12,78 @@ import google.generativeai as genai
 from PIL import Image
 from datetime import datetime
 import io
+import sqlite3
+import os
 
 try:
     from streamlit_gsheets import GSheetsConnection
     GSHEETS_AVAILABLE = True
 except ImportError:
     GSHEETS_AVAILABLE = False
+
+
+# ============================================================
+# SQLite Local Database
+# ============================================================
+DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "research_data.db")
+
+
+def _db_conn() -> sqlite3.Connection:
+    """获取 SQLite 连接 (每次调用新建，避免跨线程问题)。"""
+    conn = sqlite3.connect(DB_PATH)
+    return conn
+
+
+def _db_init():
+    """创建数据表 (如不存在)。"""
+    conn = _db_conn()
+    try:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS experiment_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                data_json TEXT NOT NULL,
+                timestamp TEXT NOT NULL
+            )
+        """)
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def db_save(df: pd.DataFrame):
+    """将整个 DataFrame 以 JSON 形式写入 SQLite (覆盖式: 只保留最新一条)。"""
+    conn = _db_conn()
+    try:
+        data_json = df.to_json(orient="split", force_ascii=False)
+        ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        conn.execute("DELETE FROM experiment_logs")
+        conn.execute(
+            "INSERT INTO experiment_logs (data_json, timestamp) VALUES (?, ?)",
+            (data_json, ts),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def db_load() -> pd.DataFrame | None:
+    """从 SQLite 读取最新保存的 DataFrame，无数据时返回 None。"""
+    conn = _db_conn()
+    try:
+        row = conn.execute(
+            "SELECT data_json FROM experiment_logs ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        if row:
+            return pd.read_json(io.StringIO(row[0]), orient="split")
+        return None
+    except Exception:
+        return None
+    finally:
+        conn.close()
+
+
+# 程序启动时确保数据库和表存在
+_db_init()
 
 
 # ============================================================
@@ -231,18 +297,24 @@ st.markdown(f"""
 # Session State
 # ============================================================
 def init_session_state():
+    # 尝试从 SQLite 恢复数据 (刷新页面时自动恢复)
+    _default_df = pd.DataFrame({
+        "温度(C)":       [1800, 1850, 1900, 1950, 2000],
+        "压力(mbar)":    [50,   55,   60,   65,   70],
+        "Ar流量(sccm)":  [100,  100,  120,  120,  150],
+        "生长时间(h)":   [24,   24,   30,   30,   36],
+        "生长速率(um/h)": [80,   95,   110,  105,  98],
+        "微管密度(cm-2)": [5.2,  4.1,  2.8,  3.5,  4.0],
+    })
+
+    restored_df = db_load()
+    starting_df = restored_df if restored_df is not None else _default_df
+
     defaults = {
         "user_role": "guest",
         "material_name": "",
         "equipment_name": "",
-        "df": pd.DataFrame({
-            "温度(C)":       [1800, 1850, 1900, 1950, 2000],
-            "压力(mbar)":    [50,   55,   60,   65,   70],
-            "Ar流量(sccm)":  [100,  100,  120,  120,  150],
-            "生长时间(h)":   [24,   24,   30,   30,   36],
-            "生长速率(um/h)": [80,   95,   110,  105,  98],
-            "微管密度(cm-2)": [5.2,  4.1,  2.8,  3.5,  4.0],
-        }),
+        "df": starting_df,
         "input_columns":  [],
         "output_columns": [],
         "target_values":  {},
@@ -251,6 +323,8 @@ def init_session_state():
         "ai_result": None,
         "api_key":   "",
         "chat_history": [],
+        "editor_version": 0,
+        "db_ready": True,
     }
     for key, val in defaults.items():
         if key not in st.session_state:
@@ -261,8 +335,20 @@ def init_session_state():
 # Utilities
 # ============================================================
 def _clear_editor_widget():
-    if "editor" in st.session_state:
-        del st.session_state["editor"]
+    """清除 data_editor widget state 并递增版本号，强制组件刷新。"""
+    ver = st.session_state.get("editor_version", 0)
+    old_key = f"editor_{ver}"
+    if old_key in st.session_state:
+        del st.session_state[old_key]
+    st.session_state["editor_version"] = ver + 1
+
+
+def _compute_df_hash(df: pd.DataFrame) -> int:
+    """计算 DataFrame 的轻量级哈希值，用于判断数据是否变更。"""
+    try:
+        return hash(pd.util.hash_pandas_object(df).sum())
+    except Exception:
+        return hash(df.to_csv())
 
 
 def style_dataframe(df: pd.DataFrame, input_cols: list, output_cols: list):
@@ -546,6 +632,7 @@ def render_data_studio():
                 new = df.copy()
                 new[name] = 0.0
                 st.session_state["df"] = new
+                db_save(new)
                 _clear_editor_widget()
                 st.rerun()
             elif not name:
@@ -578,6 +665,7 @@ def render_data_studio():
                 tv = st.session_state["target_values"]
                 if old_name in tv:
                     tv[nn] = tv.pop(old_name)
+                db_save(st.session_state["df"])
                 _clear_editor_widget()
                 st.rerun()
             elif nn == old_name:
@@ -606,6 +694,7 @@ def render_data_studio():
                 ]
                 for c in del_cols:
                     st.session_state["target_values"].pop(c, None)
+                db_save(st.session_state["df"])
                 _clear_editor_widget()
                 st.rerun()
 
@@ -648,6 +737,7 @@ def render_data_studio():
                 new_df = df.copy()
                 new_df[f_name] = result
                 st.session_state["df"] = new_df
+                db_save(new_df)
                 _clear_editor_widget()
                 st.rerun()
             except Exception as e1:
@@ -672,6 +762,7 @@ def render_data_studio():
                     new_df = df.copy()
                     new_df[f_name] = result
                     st.session_state["df"] = new_df
+                    db_save(new_df)
                     _clear_editor_widget()
                     st.rerun()
                 except Exception:
@@ -691,65 +782,66 @@ def render_data_studio():
 
     # ---- 数据存取区 (Data IO) ----
     with st.container(border=True):
-        # 云端同步 (仅管理员可见)
-        if st.session_state.get("user_role") == "admin":
-            st.caption("云端数据库 (管理员模式)")
+
+        # 云端镜像备份 (仅管理员可见)
+        if st.session_state.get("user_role") == "admin" and GSHEETS_AVAILABLE:
+            st.caption("云端镜像备份 (管理员)")
             gc1, gc2 = st.columns(2)
             with gc1:
                 if st.button(
-                    "从 Google Sheets 加载",
-                    width="stretch", key="gs_load",
+                    "同步至云端镜像",
+                    width="stretch", key="gs_mirror", type="primary",
                 ):
-                    if not GSHEETS_AVAILABLE:
-                        st.error("未安装 st-gsheets-connection，无法连接云端。")
-                    else:
-                        try:
-                            conn = st.connection(
-                                "gsheets", type=GSheetsConnection
-                            )
-                            df_cloud = conn.read()
-                            df_cloud = df_cloud.dropna(how="all")
-                            if df_cloud.empty:
-                                st.warning("云端工作表为空或无法读取。")
-                            else:
-                                st.session_state["df"] = df_cloud
-                                st.session_state["input_columns"] = []
-                                st.session_state["output_columns"] = []
-                                st.session_state["target_values"] = {}
-                                _clear_editor_widget()
-                                st.success(
-                                    f"已同步云端数据 "
-                                    f"({len(df_cloud)} 行 x "
-                                    f"{len(df_cloud.columns)} 列)"
-                                )
-                                st.rerun()
-                        except Exception as e:
-                            st.error(f"加载失败: {str(e)}")
-
+                    try:
+                        conn = st.connection(
+                            "gsheets", type=GSheetsConnection
+                        )
+                        conn.update(data=st.session_state["df"])
+                        st.success(
+                            "已将本地数据推送至 Google Sheets 云端镜像。"
+                        )
+                    except Exception as e:
+                        st.error(f"云端同步失败: {str(e)}")
+                        st.markdown(
+                            "**排查建议**: 请检查 Google Sheet 是否已"
+                            "分享给 Service Account 邮箱，并赋予 "
+                            "**Editor** 权限。"
+                        )
             with gc2:
                 if st.button(
-                    "保存到 Google Sheets",
-                    width="stretch", key="gs_save", type="primary",
+                    "从云端镜像恢复",
+                    width="stretch", key="gs_restore",
                 ):
-                    if not GSHEETS_AVAILABLE:
-                        st.error("未安装 st-gsheets-connection，无法连接云端。")
-                    else:
-                        try:
-                            conn = st.connection(
-                                "gsheets", type=GSheetsConnection
+                    try:
+                        conn = st.connection(
+                            "gsheets", type=GSheetsConnection
+                        )
+                        df_cloud = conn.read()
+                        df_cloud = df_cloud.dropna(how="all")
+                        if df_cloud.empty:
+                            st.warning("云端工作表为空或无法读取。")
+                        else:
+                            st.session_state["df"] = df_cloud
+                            st.session_state["input_columns"] = []
+                            st.session_state["output_columns"] = []
+                            st.session_state["target_values"] = {}
+                            db_save(df_cloud)
+                            _clear_editor_widget()
+                            st.success(
+                                f"已从云端恢复 "
+                                f"({len(df_cloud)} 行 x "
+                                f"{len(df_cloud.columns)} 列)"
                             )
-                            conn.update(data=st.session_state["df"])
-                            st.success("保存成功，Google Sheets 已更新。")
-                        except Exception as e:
-                            st.error(f"保存失败: {str(e)}")
-                            st.markdown(
-                                "**排查建议**: 请检查 Google Sheet 是否已"
-                                "分享给 Service Account 邮箱，并赋予 "
-                                "**Editor** 权限。"
-                            )
+                            st.rerun()
+                    except Exception as e:
+                        st.error(f"云端恢复失败: {str(e)}")
+            st.caption(
+                "提示: 日常编辑自动保存至本地数据库, "
+                "云端镜像仅在点击按钮时同步, 不会造成操作卡顿。"
+            )
             st.divider()
 
-        # 本地备份 (所有人可见)
+        # 本地文件存取 (所有人可见)
         st.caption("本地文件存取")
         lc1, lc2 = st.columns(2)
         with lc1:
@@ -774,24 +866,38 @@ def render_data_studio():
                         st.session_state["input_columns"] = []
                         st.session_state["output_columns"] = []
                         st.session_state["target_values"] = {}
+                        db_save(preview_df)
                         _clear_editor_widget()
                         st.rerun()
                 except Exception as e:
                     st.error(f"CSV 解析失败: {e}")
 
-    # ---- 全功能数据编辑器 ----
+    # ---- 本地数据库状态提示 ----
     st.markdown(
         '<div class="hint-box">'
-        '直接编辑下方表格: 增删行、修改数值、从 Excel 复制粘贴均可。'
+        '<strong>状态:</strong> 本地数据库已就绪 (实时保存中) — '
+        '编辑即保存, 刷新页面数据自动恢复。'
         '</div>',
         unsafe_allow_html=True,
     )
 
+    # ---- 全功能数据编辑器 (动态 key 确保外部数据变更时刷新) ----
+    editor_ver = st.session_state.get("editor_version", 0)
+    editor_key = f"editor_{editor_ver}"
+
+    pre_hash = _compute_df_hash(st.session_state["df"])
+
     edited_df = st.data_editor(
         st.session_state["df"],
-        num_rows="dynamic", width="stretch", height=360, key="editor",
+        num_rows="dynamic", width="stretch", height=360, key=editor_key,
     )
     st.session_state["df"] = edited_df
+
+    # ---- 本地自动保存 (防抖: 仅在数据实际变更时写入 SQLite) ----
+    post_hash = _compute_df_hash(edited_df)
+    if post_hash != pre_hash:
+        db_save(edited_df)
+        st.toast("已保存至本地数据库")
 
     # ---- 样品图片 (可选) ----
     with st.expander("样品图片 (可选)"):
