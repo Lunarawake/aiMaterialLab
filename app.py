@@ -10,6 +10,7 @@ import plotly.graph_objects as go
 import plotly.express as px
 import google.generativeai as genai
 from PIL import Image
+from datetime import datetime
 import io
 
 try:
@@ -1035,6 +1036,214 @@ def _render_visual_analytics(df: pd.DataFrame):
 
 
 # ============================================================
+# Report Generation (HTML)
+# ============================================================
+def generate_html_report() -> str:
+    """生成完整 HTML 报告，模拟 A4 纸排版，浏览器直接打开即可阅读。"""
+    now = datetime.now()
+    role = st.session_state.get("user_role", "guest").upper()
+    mat = st.session_state.get("material_name", "") or "未指定"
+    eqp = st.session_state.get("equipment_name", "") or "未指定"
+    inp = st.session_state.get("input_columns", [])
+    out = st.session_state.get("output_columns", [])
+    tvs = st.session_state.get("target_values", {})
+    df = st.session_state.get("df", pd.DataFrame())
+    ai_result = st.session_state.get("ai_result")
+
+    # ---- 数据表 HTML ----
+    if not df.empty:
+        data_table = df.to_html(
+            index=False, classes="styled-table", border=0,
+        )
+        desc_table = df.describe().to_html(
+            classes="styled-table", border=0,
+        )
+    else:
+        data_table = "<p>（无数据）</p>"
+        desc_table = "<p>（无数据）</p>"
+
+    # ---- 目标表 HTML ----
+    active_t = {k: v for k, v in tvs.items() if v}
+    if active_t:
+        target_rows = ""
+        for cn, tv in active_t.items():
+            avg_val = ""
+            if cn in df.columns and not df.empty:
+                avg_val = f"{pd.to_numeric(df[cn], errors='coerce').mean():.2f}"
+            target_rows += (
+                f"<tr><td>{cn}</td><td>{tv}</td>"
+                f"<td>{avg_val}</td></tr>\n"
+            )
+        target_html = (
+            '<table class="styled-table">'
+            "<thead><tr><th>指标</th><th>目标值</th>"
+            "<th>当前均值</th></tr></thead>"
+            f"<tbody>{target_rows}</tbody></table>"
+        )
+    else:
+        target_html = "<p>（未设定量化目标）</p>"
+
+    # ---- AI 分析内容 ----
+    if ai_result and ai_result.get("success"):
+        ai_text = ai_result.get("full_response", "")
+        # 简单将换行转为 <br>，段落用 <p>
+        ai_html = ""
+        for para in ai_text.split("\n\n"):
+            para = para.strip()
+            if not para:
+                continue
+            if para.startswith("###"):
+                heading = para.lstrip("# ").strip()
+                ai_html += f"<h3>{heading}</h3>\n"
+            elif para.startswith("##"):
+                heading = para.lstrip("# ").strip()
+                ai_html += f"<h3>{heading}</h3>\n"
+            elif para.startswith("#"):
+                heading = para.lstrip("# ").strip()
+                ai_html += f"<h3>{heading}</h3>\n"
+            else:
+                ai_html += f"<p>{para.replace(chr(10), '<br>')}</p>\n"
+    elif ai_result and not ai_result.get("success"):
+        ai_html = f"<p style='color:#c00;'>分析失败: {ai_result.get('error', '未知错误')}</p>"
+    else:
+        ai_html = "<p style='color:#888;'>尚未执行 AI 分析</p>"
+
+    # ---- 完整 HTML ----
+    html = f"""<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NEXUS Lab 实验报告 — {now.strftime('%Y-%m-%d')}</title>
+<style>
+    * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+    body {{
+        font-family: "Microsoft YaHei", "PingFang SC", Arial, sans-serif;
+        background: #F0F0F0; color: #333; line-height: 1.7;
+        padding: 20px;
+    }}
+    .paper {{
+        width: 210mm; max-width: 100%;
+        margin: 0 auto; background: #FFFFFF;
+        padding: 20mm; border-radius: 4px;
+        box-shadow: 0 2px 12px rgba(0,0,0,0.1);
+    }}
+    h1 {{
+        font-size: 1.8rem; font-weight: 800; color: #1a1a1a;
+        border-bottom: 3px solid #007AFF; padding-bottom: 0.5rem;
+        margin-bottom: 1.5rem;
+    }}
+    h1 .accent {{ color: #007AFF; }}
+    h2 {{
+        font-size: 1.2rem; font-weight: 700; color: #007AFF;
+        margin-top: 2rem; margin-bottom: 0.8rem;
+        padding-bottom: 0.3rem; border-bottom: 1px solid #E0E0E0;
+    }}
+    h3 {{
+        font-size: 1.05rem; font-weight: 600; color: #333;
+        margin-top: 1.2rem; margin-bottom: 0.5rem;
+    }}
+    p {{ margin-bottom: 0.8rem; }}
+    .meta {{
+        display: flex; gap: 2rem; flex-wrap: wrap;
+        margin-bottom: 1.5rem; font-size: 0.9rem; color: #555;
+    }}
+    .meta-item {{ }}
+    .meta-label {{
+        font-size: 0.75rem; color: #888; text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }}
+    .meta-value {{ font-weight: 600; color: #333; }}
+    .styled-table {{
+        width: 100%; border-collapse: collapse;
+        margin: 0.8rem 0 1.2rem 0; font-size: 0.9rem;
+    }}
+    .styled-table th {{
+        background: #007AFF; color: #FFFFFF;
+        padding: 0.6rem 0.8rem; text-align: left;
+        font-weight: 600;
+    }}
+    .styled-table td {{
+        padding: 0.5rem 0.8rem; border-bottom: 1px solid #E8E8E8;
+    }}
+    .styled-table tbody tr:nth-child(even) {{
+        background: #F8FAFF;
+    }}
+    .styled-table tbody tr:hover {{
+        background: #EEF4FF;
+    }}
+    .ai-section {{
+        background: #FAFBFF; border: 1px solid #D0E0F5;
+        border-left: 4px solid #007AFF; border-radius: 6px;
+        padding: 1.2rem 1.5rem; margin-top: 0.8rem;
+    }}
+    footer {{
+        text-align: center; color: #AAA; font-size: 0.8rem;
+        margin-top: 3rem; padding-top: 1rem;
+        border-top: 1px solid #E0E0E0;
+    }}
+    @media print {{
+        body {{ background: #FFF; padding: 0; }}
+        .paper {{ box-shadow: none; padding: 15mm; width: 100%; }}
+    }}
+</style>
+</head>
+<body>
+<div class="paper">
+
+    <h1><span class="accent">NEXUS</span> Lab 实验报告</h1>
+
+    <div class="meta">
+        <div class="meta-item">
+            <div class="meta-label">生成时间</div>
+            <div class="meta-value">{now.strftime('%Y-%m-%d %H:%M:%S')}</div>
+        </div>
+        <div class="meta-item">
+            <div class="meta-label">操作身份</div>
+            <div class="meta-value">{role}</div>
+        </div>
+        <div class="meta-item">
+            <div class="meta-label">研究材料</div>
+            <div class="meta-value">{mat}</div>
+        </div>
+        <div class="meta-item">
+            <div class="meta-label">设备 / 工艺</div>
+            <div class="meta-value">{eqp}</div>
+        </div>
+    </div>
+
+    <h2>1. 语义映射</h2>
+    <p>
+        <strong>参数列 (Inputs):</strong> {', '.join(inp) if inp else '未指定'}<br>
+        <strong>结果列 (Outputs):</strong> {', '.join(out) if out else '未指定'}
+    </p>
+
+    <h2>2. 量化目标</h2>
+    {target_html}
+
+    <h2>3. 实验数据 ({len(df)} 行 x {len(df.columns)} 列)</h2>
+    {data_table}
+
+    <h2>4. 数据统计摘要</h2>
+    {desc_table}
+
+    <h2>5. AI 分析报告</h2>
+    <div class="ai-section">
+        {ai_html}
+    </div>
+
+    <footer>
+        Generated by NEXUS Intelligent Assistant &mdash; {now.strftime('%Y-%m-%d')}
+    </footer>
+
+</div>
+</body>
+</html>"""
+
+    return html
+
+
+# ============================================================
 # Tab: 智能仪表盘 (Dashboard)
 # ============================================================
 def render_dashboard():
@@ -1229,6 +1438,26 @@ def render_dashboard():
             '设定目标后，点击「AI 深度分析」获取科学原理溯源与参数优化建议'
             '</div>',
             unsafe_allow_html=True,
+        )
+
+    # ---- 导出报告 ----
+    st.markdown('<hr class="section-divider">', unsafe_allow_html=True)
+    rpt_col1, rpt_col2 = st.columns([1, 3])
+    with rpt_col1:
+        report_html = generate_html_report()
+        html_filename = f"Lab_Report_{datetime.now().strftime('%Y%m%d')}.html"
+        st.download_button(
+            "下载实验报告 (网页版)",
+            data=report_html.encode("utf-8"),
+            file_name=html_filename,
+            mime="text/html",
+            width="stretch",
+            type="primary",
+        )
+    with rpt_col2:
+        st.caption(
+            "模拟 A4 排版的 HTML 报告，双击即可在浏览器中查看。"
+            "包含: 项目信息、量化目标、完整数据表、统计摘要及 AI 分析结果。"
         )
 
 
