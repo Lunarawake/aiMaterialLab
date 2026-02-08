@@ -365,12 +365,55 @@ def _clear_editor_widget():
     st.session_state["editor_version"] = ver + 1
 
 
-def _compute_df_hash(df: pd.DataFrame) -> int:
-    """计算 DataFrame 的轻量级哈希值，用于判断数据是否变更。"""
-    try:
-        return hash(pd.util.hash_pandas_object(df).sum())
-    except Exception:
-        return hash(df.to_csv())
+def _on_editor_change():
+    """data_editor 的 on_change 回调: 一旦用户修改单元格, 立即保存。"""
+    ver = st.session_state.get("editor_version", 0)
+    editor_key = f"editor_{ver}"
+    editor_state = st.session_state.get(editor_key)
+
+    if editor_state is None:
+        return
+
+    df = st.session_state["df"].copy()
+
+    # 应用 edited_rows
+    edited_rows = editor_state.get("edited_rows", {})
+    for row_idx_str, changes in edited_rows.items():
+        row_idx = int(row_idx_str)
+        if row_idx < len(df):
+            for col, val in changes.items():
+                if col in df.columns:
+                    df.at[row_idx, col] = val
+
+    # 应用 added_rows
+    added_rows = editor_state.get("added_rows", [])
+    if added_rows:
+        new_rows = pd.DataFrame(added_rows)
+        # 确保新行包含所有列
+        for col in df.columns:
+            if col not in new_rows.columns:
+                new_rows[col] = 0 if pd.api.types.is_numeric_dtype(df[col]) else ""
+        df = pd.concat([df, new_rows], ignore_index=True)
+
+    # 应用 deleted_rows
+    deleted_rows = editor_state.get("deleted_rows", [])
+    if deleted_rows:
+        df = df.drop(index=deleted_rows, errors="ignore").reset_index(drop=True)
+
+    # 清洗并保存
+    df = _clean_df(df)
+    st.session_state["df"] = df
+    db_save(df)
+    st.session_state["_save_status"] = "saved"
+
+    # Admin: 同步到云端
+    if st.session_state.get("user_role") == "admin" and GSHEETS_AVAILABLE:
+        try:
+            conn = st.connection("gsheets", type=GSheetsConnection)
+            clean = df.fillna("")
+            conn.update(data=clean)
+        except Exception:
+            pass  # 静默失败, 不阻断本地保存
 
 
 def style_dataframe(df: pd.DataFrame, input_cols: list, output_cols: list):
@@ -660,11 +703,12 @@ def render_data_studio():
                         # 1. 先保存本地
                         current_df = st.session_state["df"]
                         db_save(current_df)
-                        # 2. 全量覆盖到 Google Sheets
+                        # 2. 清洗 NaN 后全量覆盖到 Google Sheets
                         conn = st.connection(
                             "gsheets", type=GSheetsConnection
                         )
-                        conn.update(data=current_df)
+                        clean_df = current_df.fillna("")
+                        conn.update(data=clean_df)
                         st.toast("云端同步已完成")
                     except Exception as e:
                         st.error(f"云端同步失败: {str(e)}")
@@ -909,32 +953,33 @@ def render_data_studio():
                 except Exception as e:
                     st.error(f"CSV 解析失败: {e}")
 
-    # ---- 本地数据库状态提示 ----
-    st.markdown(
-        '<div class="hint-box">'
-        '<strong>状态:</strong> 本地数据库已就绪 (实时保存中) — '
-        '编辑即保存, 刷新页面数据自动恢复。'
-        '</div>',
-        unsafe_allow_html=True,
-    )
+    # ---- 状态指示 + 数据编辑器 ----
+    status_area = st.empty()
+    save_status = st.session_state.pop("_save_status", None)
+    if save_status == "saved":
+        status_area.markdown(
+            '<div class="hint-box">'
+            '<strong>状态:</strong> 所有更改已保存。'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+    else:
+        status_area.markdown(
+            '<div class="hint-box">'
+            '<strong>状态:</strong> 本地数据库已就绪 (实时保存中) — '
+            '编辑即保存, 刷新页面数据自动恢复。'
+            '</div>',
+            unsafe_allow_html=True,
+        )
 
-    # ---- 全功能数据编辑器 (动态 key 确保外部数据变更时刷新) ----
     editor_ver = st.session_state.get("editor_version", 0)
     editor_key = f"editor_{editor_ver}"
 
-    pre_hash = _compute_df_hash(st.session_state["df"])
-
-    edited_df = st.data_editor(
+    st.data_editor(
         st.session_state["df"],
-        num_rows="dynamic", width="stretch", height=360, key=editor_key,
+        num_rows="dynamic", width="stretch", height=360,
+        key=editor_key, on_change=_on_editor_change,
     )
-    st.session_state["df"] = edited_df
-
-    # ---- 本地自动保存 (防抖: 仅在数据实际变更时写入 SQLite) ----
-    post_hash = _compute_df_hash(edited_df)
-    if post_hash != pre_hash:
-        db_save(edited_df)
-        st.toast("已保存至本地数据库")
 
     # ---- 样品图片 (可选) ----
     with st.expander("样品图片 (可选)"):
@@ -977,7 +1022,7 @@ def render_data_studio():
     </div>
     """, unsafe_allow_html=True)
 
-    all_cols = edited_df.columns.tolist()
+    all_cols = st.session_state["df"].columns.tolist()
     mc1, mc2 = st.columns(2)
     with mc1:
         inp = st.multiselect(
@@ -1035,12 +1080,12 @@ def render_data_studio():
             cols = st.columns(per_row)
             for j, cn in enumerate(out[i: i + per_row]):
                 with cols[j]:
-                    if cn in edited_df.columns:
+                    if cn in st.session_state["df"].columns:
                         avg = pd.to_numeric(
-                            edited_df[cn], errors="coerce"
+                            st.session_state["df"][cn], errors="coerce"
                         ).mean()
                         mx = pd.to_numeric(
-                            edited_df[cn], errors="coerce"
+                            st.session_state["df"][cn], errors="coerce"
                         ).max()
                     else:
                         avg, mx = 0.0, 0.0
