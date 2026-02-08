@@ -369,6 +369,7 @@ def init_session_state():
         "input_columns":  [],
         "output_columns": [],
         "target_values":  {},
+        "target_memory":  {},            # 持久化记忆: 即使取消勾选也保留旧目标值
         "sample_image":      None,
         "sample_image_name": None,
         "ai_result": None,
@@ -513,6 +514,7 @@ def analyze_with_ai(
     df: pd.DataFrame, material: str, equipment: str,
     input_cols: list, output_cols: list, target_values: dict,
     api_key: str, image_bytes: bytes = None,
+    custom_prompt: str = "",
 ) -> dict:
     try:
         genai.configure(api_key=api_key)
@@ -547,6 +549,13 @@ def analyze_with_ai(
                 "\n7. 将图像观察与实验参数关联，推断工艺-形貌-性能的因果关系"
             )
 
+        custom_instr = ""
+        if custom_prompt and custom_prompt.strip():
+            custom_instr = (
+                f"\n\n用户已设定以下具体分析要求，请务必结合数据进行针对性分析:\n"
+                f"「{custom_prompt.strip()}」"
+            )
+
         system_prompt = (
             f"你是一位世界顶级的材料科学家和工艺工程师。\n"
             f"用户正在进行【{material or '材料'}】的研究。\n"
@@ -555,7 +564,7 @@ def analyze_with_ai(
             f"1. 精确指出当前数据与目标值的差距\n"
             f"2. 结合物理/化学原理解释瓶颈\n"
             f"3. 给出能够逼近目标值的具体参数建议\n"
-            f"4. 如果目标不切实际，诚实指出{img_instr}"
+            f"4. 如果目标不切实际，诚实指出{img_instr}{custom_instr}"
         )
 
         in_str = ", ".join(input_cols) if input_cols else "(用户未指定)"
@@ -1215,7 +1224,8 @@ def render_data_studio():
                 )
             st.markdown(tag_html, unsafe_allow_html=True)
 
-        # 动态目标设定
+        # 动态目标设定 (带记忆)
+        memory = dict(st.session_state.get("target_memory", {}))
         tvs = dict(st.session_state.get("target_values", {}))
         if out:
             st.markdown(
@@ -1238,18 +1248,56 @@ def render_data_studio():
                             ).max()
                         else:
                             avg, mx = 0.0, 0.0
-                        saved = tvs.get(cn, "")
+                        # 优先从 memory 恢复, 其次从 tvs
+                        remembered = memory.get(cn, tvs.get(cn, ""))
                         val = st.text_input(
                             f"[{cn}] 目标值",
-                            value=str(saved) if saved else "",
+                            value=str(remembered) if remembered else "",
                             placeholder=f"均值 {avg:.2f}",
                             help=f"当前均值: {avg:.2f}, 最优: {mx:.2f}",
                             key=f"tgt_{cn}",
                         )
                         tvs[cn] = val
+                        # 写入持久记忆 (无论是否在当前 Outputs 中)
+                        memory[cn] = val
                         st.caption(f"均值 {avg:.2f} / 最优 {mx:.2f}")
 
+        st.session_state["target_memory"] = memory
         st.session_state["target_values"] = {k: v for k, v in tvs.items() if k in out}
+
+    # =================================================================
+    # 配置状态栏 (Active Configuration)
+    # =================================================================
+    _inp = st.session_state.get("input_columns", [])
+    _out = st.session_state.get("output_columns", [])
+    _tvs = st.session_state.get("target_values", {})
+    _active_goals = {k: v for k, v in _tvs.items() if v}
+
+    if _inp or _out or _active_goals:
+        cfg_parts = []
+        if _inp:
+            inp_badges = " ".join(
+                f'<span class="mapping-tag input">{c}</span>' for c in _inp
+            )
+            cfg_parts.append(f"<b>Inputs:</b> {inp_badges}")
+        if _out:
+            out_badges = " ".join(
+                f'<span class="mapping-tag output">{c}</span>' for c in _out
+            )
+            cfg_parts.append(f"<b>Outputs:</b> {out_badges}")
+        if _active_goals:
+            goal_str = ", ".join(f"{k} → {v}" for k, v in _active_goals.items())
+            cfg_parts.append(f"<b>Goals:</b> {goal_str}")
+        st.markdown(
+            '<div class="hint-box">' + " &nbsp;|&nbsp; ".join(cfg_parts) + '</div>',
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown(
+            '<div class="hint-box" style="color:#999;">配置状态: 等待配置... '
+            '(请在上方设定参数列、结果列及目标值)</div>',
+            unsafe_allow_html=True,
+        )
 
     # =================================================================
     # 第三层: 数据表格 (The Grid)
@@ -1664,6 +1712,15 @@ def render_dashboard():
                     </div>
                     """, unsafe_allow_html=True)
 
+    # ---- 补充分析要求 (Custom Prompt) ----
+    custom_req = st.text_area(
+        "补充分析要求 (可选)",
+        value="",
+        placeholder="例如: 请重点分析温度对硬度的非线性影响, 或对比第3组和第5组实验的差异...",
+        height=80,
+        key="custom_ai_prompt",
+    )
+
     # ---- AI 控制行 ----
     analyze_btn = st.button("AI 深度分析", type="primary")
 
@@ -1683,6 +1740,7 @@ def render_dashboard():
             with st.spinner(spinner):
                 result = analyze_with_ai(
                     df, mat, eqp, inp, out, tvs, key, img_bytes,
+                    custom_prompt=custom_req,
                 )
             st.session_state["ai_result"] = result
 
