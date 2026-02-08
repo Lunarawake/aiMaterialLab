@@ -378,6 +378,8 @@ def init_session_state():
         "db_ready": True,
         "active_view": "home",       # home | dashboard | data_studio | visual | settings
         "last_sync_time": None,      # 最近云端同步时间
+        "experiment_chat_history": [],   # AI 诊断页 - 实验数据追问
+        "guide_chat_history": [],        # 首页 - 平台使用向导
     }
     for key, val in defaults.items():
         if key not in st.session_state:
@@ -706,6 +708,77 @@ def render_stats_bar():
 
 
 # ============================================================
+# Platform Guide Dialog (平台向导弹窗)
+# ============================================================
+@st.dialog("NEXUS 平台使用助手", width="large")
+def guide_dialog():
+    """平台使用向导弹窗：基于 Gemini 回答平台使用问题。"""
+
+    if st.button("关闭", key="close_guide"):
+        st.session_state["show_guide_dialog"] = False
+        st.rerun()
+
+    st.markdown(
+        "我是您的平台助手。您可以询问任何关于本平台使用方法的问题，"
+        "例如: 如何添加新列？如何同步数据？如何设置目标值？"
+    )
+
+    # 显示历史对话
+    chat_area = st.container(height=350)
+    with chat_area:
+        if not st.session_state["guide_chat_history"]:
+            st.caption("暂无对话。在下方输入您的问题。")
+        for msg in st.session_state["guide_chat_history"]:
+            with st.chat_message(msg["role"]):
+                st.markdown(msg["content"])
+
+    user_input = st.chat_input(
+        "输入问题，例如: 如何使用公式计算列？",
+        key="guide_chat_input",
+    )
+
+    if user_input:
+        api_key = st.session_state.get("api_key", "")
+        st.session_state["guide_chat_history"].append(
+            {"role": "user", "content": user_input}
+        )
+        if not api_key:
+            answer = (
+                "请先在「系统设置」页面配置 Gemini API Key，"
+                "之后即可使用 AI 助手功能。"
+            )
+        else:
+            system_prompt = (
+                "你是一个实验数据管理平台 (NEXUS Lab) 的使用助手。\n"
+                "平台功能:\n"
+                "- 首页: 功能卡片入口，快速导航到各模块\n"
+                "- 数据工作台: 管理列结构(添加/重命名/删除/公式列)、"
+                "语义映射(设定 Inputs/Outputs)、目标值设定、数据编辑器、"
+                "云端同步(Pull/Push, 仅管理员)、CSV 导入导出\n"
+                "- AI 诊断: Gemini 驱动的深度分析，支持自定义分析要求、"
+                "图像分析、实验数据追问\n"
+                "- 图表可视化: 散点图(支持趋势线)、相关性热力图\n"
+                "- 系统设置: 项目信息、Gemini API Key 配置\n"
+                "- 报告导出: 首页直接下载 HTML 实验报告\n\n"
+                "请用简短、清晰的中文回答用户关于平台使用方法的问题。"
+            )
+            try:
+                genai.configure(api_key=api_key)
+                model = genai.GenerativeModel(
+                    "gemini-2.0-flash", system_instruction=system_prompt,
+                )
+                response = model.generate_content(user_input)
+                answer = response.text
+            except Exception as e:
+                answer = f"AI 回答失败: {str(e)}"
+
+        st.session_state["guide_chat_history"].append(
+            {"role": "assistant", "content": answer}
+        )
+        st.rerun()
+
+
+# ============================================================
 # Portal Home — 功能中心 (6 Tiles + Recent Data)
 # ============================================================
 def render_portal_home():
@@ -729,27 +802,17 @@ def render_portal_home():
         st.caption("管理列结构、编辑数据、语义映射")
 
     with c2:
-        if is_admin and GSHEETS_AVAILABLE:
-            if st.button(
-                ":material/cloud_upload:  云端同步",
-                key="tile_sync", width="stretch",
-            ):
-                try:
-                    conn = st.connection("gsheets", type=GSheetsConnection)
-                    clean = st.session_state["df"].fillna("")
-                    conn.update(data=clean)
-                    st.session_state["last_sync_time"] = datetime.now().strftime("%Y-%m-%d %H:%M")
-                    db_save(st.session_state["df"])
-                    st.toast("云端同步已完成")
-                except Exception as e:
-                    st.error(f"同步失败: {str(e)}")
-            st.caption("将本地数据推送到 Google Sheets")
-        else:
-            st.button(
-                ":material/cloud_upload:  云端同步",
-                key="tile_sync_disabled", width="stretch", disabled=True,
-            )
-            st.caption("登录管理员账号以启用")
+        if st.button(
+            ":material/smart_toy:  平台向导",
+            key="tile_guide", width="stretch",
+        ):
+            st.session_state["show_guide_dialog"] = True
+            st.rerun()
+        st.caption("平台使用方法、功能说明")
+
+    # 弹窗渲染 (放在按钮逻辑之外, 基于 session_state 触发)
+    if st.session_state.get("show_guide_dialog", False):
+        guide_dialog()
 
     with c3:
         if st.button(
@@ -1867,6 +1930,75 @@ def render_dashboard():
             unsafe_allow_html=True,
         )
 
+    # =================================================================
+    # 实验数据追问 (Experiment Q&A) — 默认折叠
+    # =================================================================
+    st.divider()
+
+    with st.expander("实验数据追问 (点击展开)", expanded=False):
+        chat_area = st.container(height=400)
+        with chat_area:
+            history = st.session_state.get("experiment_chat_history", [])
+            if not history:
+                st.markdown(
+                    '<div style="text-align:center; color:#999; padding:2rem 0;">'
+                    '暂无对话。在下方输入您对实验数据的疑问，AI 将基于当前数据表回答。'
+                    '</div>',
+                    unsafe_allow_html=True,
+                )
+            for msg in history:
+                with st.chat_message(msg["role"]):
+                    st.markdown(msg["content"])
+
+        exp_input = st.chat_input(
+            "输入问题，例如: 哪一组实验的微管密度最低？温度和生长速率有什么关系？",
+            key="exp_chat_input",
+        )
+
+        if exp_input:
+            api_key = st.session_state.get("api_key", "")
+            st.session_state["experiment_chat_history"].append(
+                {"role": "user", "content": exp_input}
+            )
+            if not api_key:
+                answer = "请先在「系统设置」页面配置 Gemini API Key。"
+            else:
+                csv_data = st.session_state["df"].to_csv(index=False)
+                _mat = st.session_state.get("material_name", "")
+                _inp = st.session_state.get("input_columns", [])
+                _out = st.session_state.get("output_columns", [])
+
+                sys_prompt = (
+                    "你是一位材料科学专家和实验数据分析师。\n"
+                    f"研究材料: {_mat or '未指定'}\n"
+                    f"参数列 (Inputs): {', '.join(_inp) or '未指定'}\n"
+                    f"结果列 (Outputs): {', '.join(_out) or '未指定'}\n\n"
+                    "请基于以下实验数据回答用户问题。用简洁、专业的语言回答。"
+                    "如果数据中找不到答案，请诚实告知。\n\n"
+                    f"实验数据 (CSV):\n```\n{csv_data}\n```"
+                )
+
+                recent = st.session_state["experiment_chat_history"][-20:]
+                conversation = ""
+                for m in recent[:-1]:
+                    label = "用户" if m["role"] == "user" else "助手"
+                    conversation += f"{label}: {m['content']}\n\n"
+                conversation += f"用户: {exp_input}"
+
+                try:
+                    genai.configure(api_key=api_key)
+                    model = genai.GenerativeModel(
+                        "gemini-2.0-flash", system_instruction=sys_prompt,
+                    )
+                    response = model.generate_content(conversation)
+                    answer = response.text
+                except Exception as e:
+                    answer = f"AI 回答失败: {str(e)}"
+
+            st.session_state["experiment_chat_history"].append(
+                {"role": "assistant", "content": answer}
+            )
+            st.rerun()
 
 
 
