@@ -25,7 +25,9 @@ except ImportError:
 # ============================================================
 # SQLite Local Database
 # ============================================================
-DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "lab_storage.db")
+_APP_DIR = os.path.dirname(os.path.abspath(__file__))
+DB_PATH = os.path.join(_APP_DIR, "lab_storage.db")
+_OLD_DB_PATH = os.path.join(_APP_DIR, "research_data.db")
 
 
 def _db_conn() -> sqlite3.Connection:
@@ -100,6 +102,30 @@ def db_load() -> pd.DataFrame | None:
 _db_init()
 
 
+def _migrate_old_db():
+    """如果旧 research_data.db 存在而 lab_storage.db 中无数据，则迁移旧数据。"""
+    if not os.path.isfile(_OLD_DB_PATH):
+        return
+    # lab_storage.db 中已有数据则跳过迁移
+    if db_load() is not None:
+        return
+    try:
+        old_conn = sqlite3.connect(_OLD_DB_PATH)
+        row = old_conn.execute(
+            "SELECT data_json FROM experiment_logs ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        old_conn.close()
+        if row:
+            df = pd.read_json(io.StringIO(row[0]), orient="split")
+            if not df.empty and len(df.columns) > 0:
+                db_save(df)
+    except Exception:
+        pass  # 旧数据库格式不兼容时静默跳过
+
+
+_migrate_old_db()
+
+
 # ============================================================
 # Page Config
 # ============================================================
@@ -111,7 +137,7 @@ st.set_page_config(
 
 
 # ============================================================
-# CSS — Clinical White Theme
+# CSS — Portal Theme
 # ============================================================
 ACCENT = "#007AFF"
 
@@ -129,37 +155,58 @@ st.markdown(f"""
     section[data-testid="stSidebar"] {{display: none !important;}}
     button[data-testid="stSidebarCollapseButton"] {{display: none !important;}}
 
-    /* === Global White === */
-    .stApp {{background-color: #FFFFFF;}}
+    /* === Global === */
+    .stApp {{background-color: #F8F9FA;}}
     html, body, [class*="css"] {{
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI',
-                     'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei',
-                     sans-serif !important;
+        font-family: 'PingFang SC', 'Microsoft YaHei', -apple-system,
+                     BlinkMacSystemFont, 'Segoe UI', sans-serif !important;
         color: #333333;
     }}
 
-    /* === Navbar visual bar (pure HTML) === */
-    .nexus-navbar {{
-        background: #FFFFFF;
-        border-bottom: 2px solid {ACCENT};
-        box-shadow: 0 2px 5px rgba(0,0,0,0.05);
-        padding: 0.6rem 0; margin-bottom: 0.8rem;
+    /* === Header Bar === */
+    .portal-header {{
+        background: #FFFFFF; border-bottom: 2px solid {ACCENT};
+        box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+        padding: 0.55rem 0; margin-bottom: 1rem;
     }}
-    .navbar-logo {{
+    .portal-header .logo {{
         font-size: 1.4rem; font-weight: 800; color: #1a1a1a;
-        letter-spacing: 0.5px; line-height: 2.2rem;
+        letter-spacing: 0.5px;
     }}
-    .navbar-logo .accent {{color: {ACCENT};}}
-    .navbar-badge {{
+    .portal-header .logo .accent {{color: {ACCENT};}}
+    .portal-header .badge {{
         display: inline-block; font-size: 0.6rem; padding: 0.1rem 0.45rem;
         border-radius: 99px; margin-left: 0.5rem; font-weight: 600;
-        vertical-align: middle; letter-spacing: 0.5px;
+        vertical-align: middle;
     }}
     .badge-guest {{background: #F1F5F9; color: #64748B; border: 1px solid #E2E8F0;}}
     .badge-admin {{background: #EFF6FF; color: {ACCENT}; border: 1px solid #BFDBFE;}}
 
+    /* === Stats Bar === */
+    .stats-bar {{
+        background: #FFFFFF; border: 1px solid #E8E8E8; border-radius: 10px;
+        padding: 0.9rem 1.4rem; margin-bottom: 1.2rem;
+        display: flex; gap: 2.5rem; flex-wrap: wrap; align-items: center;
+    }}
+    .stat-item {{}}
+    .stat-label {{font-size: 0.65rem; color: #888; text-transform: uppercase; letter-spacing: 0.8px;}}
+    .stat-value {{font-size: 1.15rem; font-weight: 700; color: #333;}}
+    .stat-value.accent {{color: {ACCENT};}}
+
     /* === Popover === */
     [data-testid="stPopover"] > div {{min-width: 260px;}}
+
+    /* === Portal Tiles === */
+    .tile {{
+        background: #FFFFFF; border: 1px solid #E2E6EA; border-radius: 10px;
+        padding: 1.3rem 1.2rem; text-align: center; cursor: pointer;
+        transition: all 0.2s ease; min-height: 120px;
+        display: flex; flex-direction: column; justify-content: center;
+    }}
+    .tile:hover {{border-color: {ACCENT}; box-shadow: 0 4px 12px rgba(0,122,255,0.1);}}
+    .tile-title {{font-size: 0.95rem; font-weight: 700; color: #333; margin-top: 0.6rem;}}
+    .tile-desc {{font-size: 0.75rem; color: #888; margin-top: 0.25rem;}}
+    .tile-disabled {{opacity: 0.45; pointer-events: none;}}
 
     /* === Section Titles === */
     .area-title {{
@@ -168,11 +215,9 @@ st.markdown(f"""
         border-bottom: 2px solid {ACCENT}; display: inline-block;
     }}
     .area-number {{color: {ACCENT}; font-weight: 700;}}
-
-    /* === Divider === */
     .section-divider {{border: none; border-top: 1px solid #E8E8E8; margin: 1.5rem 0;}}
 
-    /* === Project Card === */
+    /* === Cards (project, target, AI, action) === */
     .project-card {{
         background: linear-gradient(135deg, #F8FAFF 0%, #F0F5FF 100%);
         border: 1px solid #D0E0F5; border-radius: 10px;
@@ -180,26 +225,20 @@ st.markdown(f"""
     }}
     .project-label {{font-size: 0.7rem; color: #888; text-transform: uppercase; letter-spacing: 1px;}}
     .project-value {{font-size: 1rem; font-weight: 600; color: #333; margin-top: 0.15rem;}}
-
-    /* === Target Card === */
     .target-card {{
-        background: #F0FDF4; border: 1px solid #86EFAC;
-        border-radius: 8px; padding: 0.7rem 1rem; margin-bottom: 0.5rem;
+        background: #F0FDF4; border: 1px solid #86EFAC; border-radius: 8px;
+        padding: 0.7rem 1rem; margin-bottom: 0.5rem;
     }}
     .target-label  {{font-size: 0.75rem; color: #166534; font-weight: 600;}}
     .target-value  {{font-size: 1.1rem; font-weight: 700; color: #15803D;}}
     .current-value {{font-size: 0.8rem; color: #666;}}
-
-    /* === Data Summary === */
     .data-summary {{
-        background: #F8F9FA; border: 1px solid #E0E0E0;
-        border-radius: 8px; padding: 0.9rem 1.2rem; margin-bottom: 1rem;
+        background: #FFFFFF; border: 1px solid #E0E0E0; border-radius: 8px;
+        padding: 0.9rem 1.2rem; margin-bottom: 1rem;
     }}
     .summary-item  {{display: inline-block; margin-right: 2rem;}}
     .summary-label {{font-size: 0.7rem; color: #888; text-transform: uppercase;}}
     .summary-value {{font-size: 1.2rem; font-weight: 700; color: #333;}}
-
-    /* === AI Cards === */
     .insight-card {{
         background: linear-gradient(135deg, #FAFBFF, #F5F8FF);
         border: 1px solid #D0E0F5; border-left: 4px solid {ACCENT};
@@ -219,40 +258,45 @@ st.markdown(f"""
         text-transform: uppercase; letter-spacing: 1px; margin-bottom: 0.8rem;
     }}
 
-    /* === Mapping Tags === */
+    /* === Mapping / Target / Hint === */
     .mapping-info {{
-        background: #FFF8F0; border: 1px solid #FFD6A5;
-        border-radius: 6px; padding: 0.7rem 1rem;
-        font-size: 0.85rem; color: #666; margin-bottom: 1rem;
+        background: #FFF8F0; border: 1px solid #FFD6A5; border-radius: 6px;
+        padding: 0.7rem 1rem; font-size: 0.85rem; color: #666; margin-bottom: 1rem;
     }}
-    .mapping-tag {{
-        display: inline-block; border-radius: 4px;
-        padding: 0.15rem 0.45rem; font-size: 0.8rem; margin: 0.15rem;
-    }}
+    .mapping-tag {{display: inline-block; border-radius: 4px; padding: 0.15rem 0.45rem; font-size: 0.8rem; margin: 0.15rem;}}
     .mapping-tag.input  {{background: #DBEAFE; color: #1D4ED8;}}
     .mapping-tag.output {{background: #FFF0E6; color: #C2410C;}}
-
-    /* === Target Setting === */
     .target-section {{
-        background: #FEFCE8; border: 1px solid #FEF08A;
-        border-radius: 8px; padding: 0.9rem 1.1rem; margin-top: 0.8rem;
+        background: #FEFCE8; border: 1px solid #FEF08A; border-radius: 8px;
+        padding: 0.9rem 1.1rem; margin-top: 0.8rem;
     }}
-    .target-section-title {{
-        font-size: 0.85rem; font-weight: 600; color: #854D0E; margin-bottom: 0.6rem;
+    .target-section-title {{font-size: 0.85rem; font-weight: 600; color: #854D0E; margin-bottom: 0.6rem;}}
+    .hint-box {{
+        background: #F0F7FF; border: 1px solid #BFDBFE; border-radius: 6px;
+        padding: 0.7rem 1rem; font-size: 0.85rem; color: #1E40AF; margin-bottom: 0.8rem;
     }}
+    .placeholder-box {{
+        background: #FFFFFF; border: 1px dashed #D0D0D0; border-radius: 8px;
+        padding: 2.5rem; text-align: center; color: #999;
+    }}
+
+    /* === Recent Data Table === */
+    .recent-section {{
+        background: #FFFFFF; border: 1px solid #E2E6EA; border-radius: 10px;
+        padding: 1.2rem 1.4rem; margin-top: 1rem;
+    }}
+    .recent-title {{font-size: 0.95rem; font-weight: 700; color: #333; margin-bottom: 0.6rem;}}
 
     /* === Buttons === */
     .stButton > button {{
-        border-radius: 4px; font-weight: 600; transition: all 0.15s ease;
-        background: #FFFFFF; color: #333333; border: 1px solid #D0D0D0;
+        border-radius: 6px; font-weight: 600; transition: all 0.15s ease;
+        background: #FFFFFF; color: #333; border: 1px solid #D0D0D0;
     }}
-    .stButton > button:hover {{
-        border-color: {ACCENT}; color: {ACCENT};
-    }}
+    .stButton > button:hover {{border-color: {ACCENT}; color: {ACCENT};}}
     .stButton > button[kind="primary"],
     .stButton > button[data-testid="stBaseButton-primary"] {{
-        background: {ACCENT} !important; color: #FFFFFF !important;
-        border: none !important; border-radius: 4px !important;
+        background: {ACCENT} !important; color: #FFF !important;
+        border: none !important; border-radius: 6px !important;
     }}
     .stButton > button[kind="primary"]:hover,
     .stButton > button[data-testid="stBaseButton-primary"]:hover {{
@@ -261,23 +305,9 @@ st.markdown(f"""
 
     /* === Tabs === */
     .stTabs [data-baseweb="tab-list"] button[aria-selected="true"] {{
-        border-bottom-color: {ACCENT} !important; color: {ACCENT} !important;
-        font-weight: 600;
+        border-bottom-color: {ACCENT} !important; color: {ACCENT} !important; font-weight: 600;
     }}
     .stTabs [data-baseweb="tab-list"] button {{color: #888;}}
-
-    /* === Hint Box === */
-    .hint-box {{
-        background: #F0F7FF; border: 1px solid #BFDBFE;
-        border-radius: 6px; padding: 0.7rem 1rem;
-        font-size: 0.85rem; color: #1E40AF; margin-bottom: 0.8rem;
-    }}
-
-    /* === Placeholder === */
-    .placeholder-box {{
-        background: #FAFBFC; border: 1px dashed #D0D0D0;
-        border-radius: 8px; padding: 2.5rem; text-align: center; color: #999;
-    }}
 
     /* === Footer === */
     .app-footer {{
@@ -287,7 +317,7 @@ st.markdown(f"""
 
     /* === Layout Spacing === */
     .main .block-container {{
-        padding-top: 1.5rem !important;
+        padding-top: 1.2rem !important;
         padding-left: 2.5rem; padding-right: 2.5rem; padding-bottom: 2rem;
     }}
 
@@ -295,8 +325,7 @@ st.markdown(f"""
     .stTextInput > div > div > input,
     .stTextArea > div > div > textarea,
     .stNumberInput > div > div > input {{
-        background: #FFFFFF; border: 1px solid #E0E0E0;
-        border-radius: 4px; color: #333;
+        background: #FFF; border: 1px solid #E0E0E0; border-radius: 4px; color: #333;
     }}
     .stTextInput > div > div > input:focus,
     .stTextArea > div > div > textarea:focus,
@@ -347,6 +376,8 @@ def init_session_state():
         "chat_history": [],
         "editor_version": 0,
         "db_ready": True,
+        "active_view": "home",       # home | dashboard | data_studio | visual | settings
+        "last_sync_time": None,      # 最近云端同步时间
     }
     for key, val in defaults.items():
         if key not in st.session_state:
@@ -577,38 +608,26 @@ def analyze_with_ai(
 
 
 # ============================================================
-# Navbar (4-column layout in main flow)
+# Portal Header (Logo + Badge + Popover)
 # ============================================================
-def render_navbar():
-    """4-column navbar: Logo | spacer | user popover | right buffer."""
+def render_header():
+    """简洁的门户顶栏：左侧 Logo / 右侧登录 Popover。"""
     role = st.session_state.get("user_role", "guest")
     is_admin = role == "admin"
-    badge = (
-        '<span class="navbar-badge badge-admin">ADMIN</span>'
-        if is_admin
-        else '<span class="navbar-badge badge-guest">GUEST</span>'
-    )
+    badge_cls = "badge-admin" if is_admin else "badge-guest"
+    badge_txt = "ADMIN" if is_admin else "GUEST"
 
-    # Visual top bar
     st.markdown(
-        f'<div class="nexus-navbar">'
-        f'  <div class="navbar-logo">'
-        f'    <span class="accent">NEXUS</span> Lab {badge}'
-        f'  </div>'
+        f'<div class="portal-header">'
+        f'  <span class="logo"><span class="accent">NEXUS</span> Lab</span>'
+        f'  <span class="badge {badge_cls}">{badge_txt}</span>'
         f'</div>',
         unsafe_allow_html=True,
     )
 
-    # 4-column layout: logo label | spacer | popover | right buffer
-    col1, col2, col3, col4 = st.columns([3, 4, 2, 1])
-
-    with col1:
-        pass  # Logo already rendered as HTML above
-
-    with col2:
-        pass  # Spacer
-
-    with col3:
+    # 两列布局: 左侧留白 | 右侧 popover
+    _, pop_col = st.columns([8, 2])
+    with pop_col:
         popover_label = "Admin" if is_admin else "未登录"
         with st.popover(popover_label, width="stretch"):
             if is_admin:
@@ -638,14 +657,282 @@ def render_navbar():
                             '```toml\n[general]\npassword = "your_password"\n```'
                         )
 
-    with col4:
-        pass  # Right buffer
+
+# ============================================================
+# Stats Bar (功能概览)
+# ============================================================
+def render_stats_bar():
+    """显示数据库关键指标的水平统计栏。"""
+    df = st.session_state["df"]
+    rows, cols = df.shape
+    sync_time = st.session_state.get("last_sync_time")
+    sync_display = sync_time if sync_time else "尚未同步"
+    role_display = "管理员" if st.session_state.get("user_role") == "admin" else "访客"
+    db_status = "实时保存中" if st.session_state.get("db_ready") else "未连接"
+
+    st.markdown(
+        f'<div class="stats-bar">'
+        f'  <div class="stat-item">'
+        f'    <div class="stat-label">实验总条目</div>'
+        f'    <div class="stat-value accent">{rows}</div>'
+        f'  </div>'
+        f'  <div class="stat-item">'
+        f'    <div class="stat-label">数据列数</div>'
+        f'    <div class="stat-value">{cols}</div>'
+        f'  </div>'
+        f'  <div class="stat-item">'
+        f'    <div class="stat-label">当前身份</div>'
+        f'    <div class="stat-value">{role_display}</div>'
+        f'  </div>'
+        f'  <div class="stat-item">'
+        f'    <div class="stat-label">本地存储</div>'
+        f'    <div class="stat-value">{db_status}</div>'
+        f'  </div>'
+        f'  <div class="stat-item">'
+        f'    <div class="stat-label">最近云端同步</div>'
+        f'    <div class="stat-value">{sync_display}</div>'
+        f'  </div>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+
+
+# ============================================================
+# Portal Home — 功能中心 (6 Tiles + Recent Data)
+# ============================================================
+def render_portal_home():
+    """门户首页：功能磁贴卡片 + 最近数据摘要。"""
+    is_admin = st.session_state.get("user_role") == "admin"
+
+    st.markdown(
+        '<p style="font-size:0.85rem;color:#888;margin-bottom:0.6rem;">功能中心</p>',
+        unsafe_allow_html=True,
+    )
+
+    # --- Row 1: 三张卡片 ---
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        if st.button(
+            ":material/table_chart:  数据工作台",
+            key="tile_studio", width="stretch",
+        ):
+            st.session_state["active_view"] = "data_studio"
+            st.rerun()
+        st.caption("管理列结构、编辑数据、语义映射")
+
+    with c2:
+        if is_admin and GSHEETS_AVAILABLE:
+            if st.button(
+                ":material/cloud_upload:  云端同步",
+                key="tile_sync", width="stretch",
+            ):
+                try:
+                    conn = st.connection("gsheets", type=GSheetsConnection)
+                    clean = st.session_state["df"].fillna("")
+                    conn.update(data=clean)
+                    st.session_state["last_sync_time"] = datetime.now().strftime("%Y-%m-%d %H:%M")
+                    db_save(st.session_state["df"])
+                    st.toast("云端同步已完成")
+                except Exception as e:
+                    st.error(f"同步失败: {str(e)}")
+            st.caption("将本地数据推送到 Google Sheets")
+        else:
+            st.button(
+                ":material/cloud_upload:  云端同步",
+                key="tile_sync_disabled", width="stretch", disabled=True,
+            )
+            st.caption("登录管理员账号以启用")
+
+    with c3:
+        if st.button(
+            ":material/psychology:  AI 诊断",
+            key="tile_ai", width="stretch",
+        ):
+            st.session_state["active_view"] = "dashboard"
+            st.rerun()
+        st.caption("Gemini 驱动的智能实验分析")
+
+    # --- Row 2: 三张卡片 ---
+    c4, c5, c6 = st.columns(3)
+    with c4:
+        if st.button(
+            ":material/leaderboard:  图表可视化",
+            key="tile_visual", width="stretch",
+        ):
+            st.session_state["active_view"] = "visual"
+            st.rerun()
+        st.caption("散点趋势图、相关性热力图")
+
+    with c5:
+        if st.button(
+            ":material/description:  报告导出",
+            key="tile_report", width="stretch",
+        ):
+            st.session_state["active_view"] = "dashboard"
+            st.rerun()
+        st.caption("生成 HTML 实验报告并下载")
+
+    with c6:
+        if st.button(
+            ":material/settings:  系统设置",
+            key="tile_settings", width="stretch",
+        ):
+            st.session_state["active_view"] = "settings"
+            st.rerun()
+        st.caption("项目信息、Gemini API 配置")
+
+    # --- 最近数据摘要 ---
+    st.markdown('<hr class="section-divider">', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="recent-section">'
+        '  <div class="recent-title">最近数据 (Recent Entries)</div>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+    df = st.session_state["df"]
+    if df is not None and not df.empty:
+        st.dataframe(df.tail(5), width="stretch", hide_index=True)
+    else:
+        st.info("暂无数据。请进入数据工作台添加实验记录。")
+
+
+# ============================================================
+# Settings Page — 系统设置
+# ============================================================
+def render_settings():
+    """项目信息和 API Key 配置。"""
+    if st.button(":material/arrow_back: 返回首页", key="back_settings"):
+        st.session_state["active_view"] = "home"
+        st.rerun()
+
+    st.markdown('<span class="area-title">系统设置</span>', unsafe_allow_html=True)
+
+    st.subheader("项目信息")
+    col_a, col_b = st.columns(2)
+    with col_a:
+        mat = st.text_input(
+            "研究材料名称",
+            value=st.session_state.get("material_name", ""),
+            key="settings_mat",
+        )
+        if mat != st.session_state.get("material_name"):
+            st.session_state["material_name"] = mat
+    with col_b:
+        eq = st.text_input(
+            "设备 / 工艺名称",
+            value=st.session_state.get("equipment_name", ""),
+            key="settings_eq",
+        )
+        if eq != st.session_state.get("equipment_name"):
+            st.session_state["equipment_name"] = eq
+
+    st.divider()
+    st.subheader("Gemini API Key")
+    api = st.text_input(
+        "API Key",
+        value=st.session_state.get("api_key", ""),
+        type="password",
+        key="settings_api",
+    )
+    if api != st.session_state.get("api_key"):
+        st.session_state["api_key"] = api
+    st.caption("API Key 仅保留在当前会话内存中，关闭页面后自动清除。")
+
+    st.divider()
+    st.subheader("语义映射")
+    all_cols = st.session_state["df"].columns.tolist()
+    inp = st.multiselect(
+        "参数列 (Inputs)",
+        options=all_cols,
+        default=st.session_state.get("input_columns", []),
+        key="settings_inp",
+    )
+    out = st.multiselect(
+        "结果列 (Outputs)",
+        options=all_cols,
+        default=st.session_state.get("output_columns", []),
+        key="settings_out",
+    )
+    st.session_state["input_columns"] = inp
+    st.session_state["output_columns"] = out
+
+
+# ============================================================
+# Visual Analytics (独立页面)
+# ============================================================
+def render_visual_page():
+    """图表可视化独立页面。"""
+    if st.button(":material/arrow_back: 返回首页", key="back_visual"):
+        st.session_state["active_view"] = "home"
+        st.rerun()
+
+    st.markdown('<span class="area-title">图表可视化</span>', unsafe_allow_html=True)
+
+    df = st.session_state["df"]
+    numeric_cols = df.select_dtypes(include="number").columns.tolist()
+    all_cols = df.columns.tolist()
+
+    if len(numeric_cols) < 2:
+        st.info("至少需要 2 个数值列才能绘制图表。")
+        return
+
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        x_col = st.selectbox("X 轴", options=numeric_cols, index=0, key="vis_x")
+    with c2:
+        y_col = st.selectbox(
+            "Y 轴", options=numeric_cols,
+            index=min(len(numeric_cols) - 1, 1), key="vis_y",
+        )
+    with c3:
+        color_col = st.selectbox(
+            "颜色映射 (可选)", options=["(无)"] + all_cols, index=0, key="vis_color",
+        )
+
+    color = color_col if color_col != "(无)" else None
+    try:
+        fig_sc = px.scatter(
+            df, x=x_col, y=y_col, color=color, trendline="ols",
+            template="simple_white",
+            color_continuous_scale="Blues",
+        )
+        fig_sc.update_layout(
+            margin=dict(l=40, r=20, t=30, b=40),
+            plot_bgcolor="#FFFFFF", paper_bgcolor="#F8F9FA",
+        )
+        st.plotly_chart(fig_sc, width="stretch")
+    except Exception:
+        fig_sc = px.scatter(df, x=x_col, y=y_col, color=color, template="simple_white")
+        fig_sc.update_layout(
+            margin=dict(l=40, r=20, t=30, b=40),
+            plot_bgcolor="#FFFFFF", paper_bgcolor="#F8F9FA",
+        )
+        st.plotly_chart(fig_sc, width="stretch")
+
+    st.markdown("**相关性热力图**")
+    corr = df[numeric_cols].corr()
+    fig_hm = go.Figure(data=go.Heatmap(
+        z=corr.values, x=corr.columns.tolist(), y=corr.index.tolist(),
+        colorscale="Blues", zmin=-1, zmax=1,
+        text=corr.values.round(2), texttemplate="%{text}",
+    ))
+    fig_hm.update_layout(
+        margin=dict(l=60, r=20, t=30, b=60), height=420,
+        plot_bgcolor="#FFFFFF", paper_bgcolor="#F8F9FA",
+    )
+    st.plotly_chart(fig_hm, width="stretch")
 
 
 # ============================================================
 # Tab: 数据工作台 (Data Studio)
 # ============================================================
 def render_data_studio():
+    if st.button(":material/arrow_back: 返回首页", key="back_studio"):
+        st.session_state["active_view"] = "home"
+        st.rerun()
+
+    st.markdown('<span class="area-title">数据工作台</span>', unsafe_allow_html=True)
+
     df = st.session_state["df"]
 
     # === 0. 云端同步控制台 (仅管理员可见, 置顶) ===
@@ -684,6 +971,7 @@ def render_data_studio():
                             st.session_state["target_values"] = {}
                             db_save(df_cloud)
                             _clear_editor_widget()
+                            st.session_state["last_sync_time"] = datetime.now().strftime("%Y-%m-%d %H:%M")
                             st.success(
                                 f"已从云端拉取并覆盖本地 "
                                 f"({len(df_cloud)} 行 x "
@@ -709,6 +997,7 @@ def render_data_studio():
                         )
                         clean_df = current_df.fillna("")
                         conn.update(data=clean_df)
+                        st.session_state["last_sync_time"] = datetime.now().strftime("%Y-%m-%d %H:%M")
                         st.toast("云端同步已完成")
                     except Exception as e:
                         st.error(f"云端同步失败: {str(e)}")
@@ -1435,6 +1724,12 @@ def generate_html_report() -> str:
 # Tab: 智能仪表盘 (Dashboard)
 # ============================================================
 def render_dashboard():
+    if st.button(":material/arrow_back: 返回首页", key="back_dashboard"):
+        st.session_state["active_view"] = "home"
+        st.rerun()
+
+    st.markdown('<span class="area-title">智能仪表盘</span>', unsafe_allow_html=True)
+
     df = st.session_state["df"]
     inp = st.session_state["input_columns"]
     out = st.session_state["output_columns"]
@@ -1740,26 +2035,37 @@ def render_data_copilot():
 
 
 # ============================================================
-# Main
+# Main — Portal Routing
 # ============================================================
 def main():
     init_session_state()
 
-    # 顶部导航栏
-    render_navbar()
+    # 顶部 Header + 统计栏
+    render_header()
+    render_stats_bar()
 
-    # 主内容 — 双标签页
-    tab_dashboard, tab_studio = st.tabs([
-        "智能仪表盘 (Dashboard)",
-        "数据工作台 (Data Studio)",
-    ])
+    # 根据 active_view 路由
+    view = st.session_state.get("active_view", "home")
 
-    with tab_dashboard:
-        render_dashboard()
-    with tab_studio:
+    if view == "home":
+        render_portal_home()
+
+    elif view == "data_studio":
         render_data_studio()
 
-    # 智能问答助手 (在 Tab 之外)
+    elif view == "dashboard":
+        render_dashboard()
+
+    elif view == "visual":
+        render_visual_page()
+
+    elif view == "settings":
+        render_settings()
+
+    else:
+        render_portal_home()
+
+    # 智能问答助手 (全局)
     render_data_copilot()
 
     # 页脚
