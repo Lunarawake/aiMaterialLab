@@ -865,17 +865,17 @@ def render_visual_page():
     numeric_cols = df.select_dtypes(include="number").columns.tolist()
     all_cols = df.columns.tolist()
 
-    if len(numeric_cols) < 2:
-        st.info("至少需要 2 个数值列才能绘制图表。")
+    if len(numeric_cols) < 1:
+        st.info("至少需要 1 个数值列才能绘制图表。")
         return
 
     c1, c2, c3 = st.columns(3)
     with c1:
-        x_col = st.selectbox("X 轴", options=numeric_cols, index=0, key="vis_x")
+        x_col = st.selectbox("X 轴 (支持文本列)", options=all_cols, index=0, key="vis_x")
     with c2:
         y_col = st.selectbox(
-            "Y 轴", options=numeric_cols,
-            index=min(len(numeric_cols) - 1, 1), key="vis_y",
+            "Y 轴 (仅数值列)", options=numeric_cols,
+            index=min(len(numeric_cols) - 1, 0), key="vis_y",
         )
     with c3:
         color_col = st.selectbox(
@@ -1052,11 +1052,18 @@ def render_data_studio():
 
             with pop_tabs[0]:
                 ncn = st.text_input("新列名", key="new_col_name", placeholder="输入列名")
+                col_dtype = st.radio(
+                    "数据类型", ["数值 (Number)", "文本 (Text)"],
+                    index=0, key="new_col_dtype", horizontal=True,
+                )
                 if st.button("立即创建", key="add_col_btn", type="primary", width="stretch"):
                     name = (ncn or "").strip()
                     if name and name not in df.columns:
                         new = df.copy()
-                        new[name] = 0.0
+                        if col_dtype.startswith("文本"):
+                            new[name] = ""
+                        else:
+                            new[name] = 0.0
                         st.session_state["df"] = new
                         db_save(new)
                         _clear_editor_widget()
@@ -1345,7 +1352,7 @@ def _render_visual_analytics(df: pd.DataFrame):
 
     # 筛选数值列
     num_cols = df.select_dtypes(include="number").columns.tolist()
-    if len(num_cols) < 2:
+    if len(num_cols) < 1:
         return
 
     all_cols = df.columns.tolist()
@@ -1356,14 +1363,14 @@ def _render_visual_analytics(df: pd.DataFrame):
         ctrl1, ctrl2, ctrl3 = st.columns(3)
         with ctrl1:
             x_col = st.selectbox(
-                "X 轴", num_cols,
+                "X 轴 (支持文本列)", all_cols,
                 index=0,
                 key="va_x",
             )
         with ctrl2:
-            y_default = min(len(num_cols) - 1, max(0, len(num_cols) - 1))
+            y_default = min(len(num_cols) - 1, 0)
             y_col = st.selectbox(
-                "Y 轴", num_cols,
+                "Y 轴 (仅数值列)", num_cols,
                 index=y_default,
                 key="va_y",
             )
