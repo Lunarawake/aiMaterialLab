@@ -1470,7 +1470,19 @@ def render_data_studio():
     _sync_column_order()
     col_order = st.session_state["custom_column_order"]
     df_ordered = st.session_state["df"][col_order]
+
+    # 强制所有数值列为 float, 防止 int 导致小数点被截断
+    for _nc in df_ordered.select_dtypes(include=["number"]).columns:
+        df_ordered[_nc] = df_ordered[_nc].astype(float)
     st.session_state["df"] = df_ordered
+
+    # 动态生成 column_config: 数值列允许高精度输入
+    _col_cfg = {}
+    for _nc in df_ordered.select_dtypes(include=["number"]).columns:
+        _col_cfg[_nc] = st.column_config.NumberColumn(
+            label=_nc,
+            step=0.0001,
+        )
 
     editor_ver = st.session_state.get("editor_version", 0)
     editor_key = f"editor_{editor_ver}"
@@ -1479,6 +1491,7 @@ def render_data_studio():
         df_ordered,
         num_rows="dynamic", width="stretch", height=420,
         key=editor_key, on_change=_on_editor_change,
+        column_config=_col_cfg,
     )
 
 
