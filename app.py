@@ -21,6 +21,12 @@ try:
 except ImportError:
     GSHEETS_AVAILABLE = False
 
+try:
+    from streamlit_sortables import sort_items
+    SORTABLES_AVAILABLE = True
+except ImportError:
+    SORTABLES_AVAILABLE = False
+
 
 # ============================================================
 # SQLite Local Database
@@ -380,6 +386,7 @@ def init_session_state():
         "last_sync_time": None,      # 最近云端同步时间
         "experiment_chat_history": [],   # AI 诊断页 - 实验数据追问
         "guide_chat_history": [],        # 首页 - 平台使用向导
+        "custom_column_order": starting_df.columns.tolist(),  # 用户自定义列顺序
     }
     for key, val in defaults.items():
         if key not in st.session_state:
@@ -396,6 +403,18 @@ def _clear_editor_widget():
     if old_key in st.session_state:
         del st.session_state[old_key]
     st.session_state["editor_version"] = ver + 1
+
+
+def _sync_column_order():
+    """防御性同步: 确保 custom_column_order 与 df.columns 一致。"""
+    df_cols = st.session_state["df"].columns.tolist()
+    order = st.session_state.get("custom_column_order", [])
+    # 保留顺序中仍存在的列, 追加新出现的列
+    synced = [c for c in order if c in df_cols]
+    for c in df_cols:
+        if c not in synced:
+            synced.append(c)
+    st.session_state["custom_column_order"] = synced
 
 
 def _on_editor_change():
@@ -1025,6 +1044,7 @@ def render_data_studio():
                             st.session_state["input_columns"] = []
                             st.session_state["output_columns"] = []
                             st.session_state["target_values"] = {}
+                            st.session_state["custom_column_order"] = df_cloud.columns.tolist()
                             db_save(df_cloud)
                             _clear_editor_widget()
                             st.session_state["last_sync_time"] = datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -1087,6 +1107,7 @@ def render_data_studio():
                         st.session_state["input_columns"] = []
                         st.session_state["output_columns"] = []
                         st.session_state["target_values"] = {}
+                        st.session_state["custom_column_order"] = preview_df.columns.tolist()
                         db_save(preview_df)
                         _clear_editor_widget()
                         st.rerun()
@@ -1110,8 +1131,8 @@ def render_data_studio():
     with schema_left:
         cols_list = df.columns.tolist()
 
-        with st.popover(":material/build: 表格结构管理", help="添加、重命名、删除列，或用公式生成新列"):
-            pop_tabs = st.tabs(["新增", "重命名", "删除", "公式列"])
+        with st.popover(":material/build: 表格结构管理", help="添加、重命名、删除、排序列，或用公式生成新列"):
+            pop_tabs = st.tabs(["新增", "重命名", "删除", "公式列", "排序"])
 
             with pop_tabs[0]:
                 ncn = st.text_input("新列名", key="new_col_name", placeholder="输入列名")
@@ -1128,6 +1149,8 @@ def render_data_studio():
                         else:
                             new[name] = 0.0
                         st.session_state["df"] = new
+                        st.session_state.get("custom_column_order", []).append(name)
+                        _sync_column_order()
                         db_save(new)
                         _clear_editor_widget()
                         st.rerun()
@@ -1152,6 +1175,10 @@ def render_data_studio():
                         tv = st.session_state["target_values"]
                         if old_name in tv:
                             tv[nn] = tv.pop(old_name)
+                        st.session_state["custom_column_order"] = [
+                            nn if c == old_name else c
+                            for c in st.session_state.get("custom_column_order", [])
+                        ]
                         db_save(st.session_state["df"])
                         _clear_editor_widget()
                         st.rerun()
@@ -1173,6 +1200,10 @@ def render_data_studio():
                         ]
                         for c in del_cols:
                             st.session_state["target_values"].pop(c, None)
+                        st.session_state["custom_column_order"] = [
+                            c for c in st.session_state.get("custom_column_order", [])
+                            if c not in del_cols
+                        ]
                         db_save(st.session_state["df"])
                         _clear_editor_widget()
                         st.rerun()
@@ -1201,6 +1232,8 @@ def render_data_studio():
                             new_df = df.copy()
                             new_df[f_name] = result
                             st.session_state["df"] = new_df
+                            st.session_state.get("custom_column_order", []).append(f_name)
+                            _sync_column_order()
                             db_save(new_df)
                             _clear_editor_widget()
                             st.rerun()
@@ -1215,6 +1248,8 @@ def render_data_studio():
                                 new_df = df.copy()
                                 new_df[f_name] = result
                                 st.session_state["df"] = new_df
+                                st.session_state.get("custom_column_order", []).append(f_name)
+                                _sync_column_order()
                                 db_save(new_df)
                                 _clear_editor_widget()
                                 st.rerun()
@@ -1226,6 +1261,42 @@ def render_data_studio():
                                     f"- `` `列A` / `列B` * 100 ``\n\n"
                                     f"当前可用列名: {', '.join(df.columns.tolist())}"
                                 )
+
+            with pop_tabs[4]:
+                _sync_column_order()
+                current_order = st.session_state["custom_column_order"]
+
+                if SORTABLES_AVAILABLE:
+                    st.caption("上下拖拽调整列的显示顺序")
+                    sorted_cols = sort_items(current_order, direction="vertical")
+                    if sorted_cols != current_order:
+                        st.session_state["custom_column_order"] = sorted_cols
+                        st.session_state["df"] = st.session_state["df"][sorted_cols]
+                        db_save(st.session_state["df"])
+                        _clear_editor_widget()
+                        st.rerun()
+                else:
+                    st.caption("拖拽排序需要安装 streamlit-sortables")
+                    st.code("pip install streamlit-sortables", language="bash")
+                    st.caption("安装后重启应用即可使用拖拽排序。以下为备用方案:")
+                    new_order = st.multiselect(
+                        "列顺序 (拖拽标签调整)",
+                        options=current_order,
+                        default=current_order,
+                        key="reorder_cols",
+                        label_visibility="collapsed",
+                    )
+                    if st.button("应用排序", key="apply_order_btn", type="primary", width="stretch"):
+                        if set(new_order) == set(current_order) and len(new_order) == len(current_order):
+                            st.session_state["custom_column_order"] = new_order
+                            st.session_state["df"] = st.session_state["df"][new_order]
+                            db_save(st.session_state["df"])
+                            _clear_editor_widget()
+                            st.rerun()
+                        else:
+                            st.warning(
+                                f"请保留全部 {len(current_order)} 列，只调整顺序。"
+                            )
 
         # 样品图片 (可选)
         with st.expander("样品图片 (可选)"):
@@ -1395,11 +1466,17 @@ def render_data_studio():
             unsafe_allow_html=True,
         )
 
+    # 应用自定义列顺序
+    _sync_column_order()
+    col_order = st.session_state["custom_column_order"]
+    df_ordered = st.session_state["df"][col_order]
+    st.session_state["df"] = df_ordered
+
     editor_ver = st.session_state.get("editor_version", 0)
     editor_key = f"editor_{editor_ver}"
 
     st.data_editor(
-        st.session_state["df"],
+        df_ordered,
         num_rows="dynamic", width="stretch", height=420,
         key=editor_key, on_change=_on_editor_change,
     )
