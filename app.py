@@ -373,7 +373,6 @@ def init_session_state():
         "sample_image_name": None,
         "ai_result": None,
         "api_key":   "",
-        "chat_history": [],
         "editor_version": 0,
         "db_ready": True,
         "active_view": "home",       # home | dashboard | data_studio | visual | settings
@@ -764,13 +763,16 @@ def render_portal_home():
         st.caption("散点趋势图、相关性热力图")
 
     with c5:
-        if st.button(
+        report_html = generate_html_report()
+        html_filename = f"Lab_Report_{datetime.now().strftime('%Y%m%d')}.html"
+        st.download_button(
             ":material/description:  报告导出",
+            data=report_html.encode("utf-8"),
+            file_name=html_filename,
+            mime="text/html",
             key="tile_report", width="stretch",
-        ):
-            st.session_state["active_view"] = "dashboard"
-            st.rerun()
-        st.caption("生成 HTML 实验报告并下载")
+        )
+        st.caption("点击即下载 HTML 实验报告")
 
     with c6:
         if st.button(
@@ -837,24 +839,6 @@ def render_settings():
     if api != st.session_state.get("api_key"):
         st.session_state["api_key"] = api
     st.caption("API Key 仅保留在当前会话内存中，关闭页面后自动清除。")
-
-    st.divider()
-    st.subheader("语义映射")
-    all_cols = st.session_state["df"].columns.tolist()
-    inp = st.multiselect(
-        "参数列 (Inputs)",
-        options=all_cols,
-        default=st.session_state.get("input_columns", []),
-        key="settings_inp",
-    )
-    out = st.multiselect(
-        "结果列 (Outputs)",
-        options=all_cols,
-        default=st.session_state.get("output_columns", []),
-        key="settings_out",
-    )
-    st.session_state["input_columns"] = inp
-    st.session_state["output_columns"] = out
 
 
 # ============================================================
@@ -935,26 +919,27 @@ def render_data_studio():
 
     df = st.session_state["df"]
 
-    # === 0. 云端同步控制台 (仅管理员可见, 置顶) ===
-    if st.session_state.get("user_role") == "admin" and GSHEETS_AVAILABLE:
-        with st.container(border=True):
-            st.caption("云端同步控制台 (管理员)")
-            sc1, sc2 = st.columns(2)
+    # =================================================================
+    # 第一层: 数据存取区 (IO Zone) — 云端 + 本地统一置顶
+    # =================================================================
+    with st.container(border=True):
+        st.markdown(
+            '<div class="area-title"><span class="area-number">01</span> 数据存取</div>',
+            unsafe_allow_html=True,
+        )
 
+        # ---- 云端同步 (仅管理员可见) ----
+        if st.session_state.get("user_role") == "admin" and GSHEETS_AVAILABLE:
+            sc1, sc2 = st.columns(2)
             with sc1:
                 if st.button(
                     "从云端拉取 (Pull)",
                     width="stretch", key="gs_pull",
                 ):
                     try:
-                        # 1. 清除所有缓存
                         st.cache_data.clear()
-                        # 2. 从 Google Sheets 读取
-                        conn = st.connection(
-                            "gsheets", type=GSheetsConnection
-                        )
+                        conn = st.connection("gsheets", type=GSheetsConnection)
                         df_cloud = conn.read()
-                        # 3. 数据清洗
                         df_cloud = df_cloud.dropna(how="all").reset_index(drop=True)
                         for col in df_cloud.columns:
                             if pd.api.types.is_numeric_dtype(df_cloud[col]):
@@ -964,7 +949,6 @@ def render_data_studio():
                         if df_cloud.empty or len(df_cloud.columns) == 0:
                             st.warning("云端工作表为空, 未执行覆盖。")
                         else:
-                            # 4. 覆盖本地 session + SQLite
                             st.session_state["df"] = df_cloud
                             st.session_state["input_columns"] = []
                             st.session_state["output_columns"] = []
@@ -974,10 +958,8 @@ def render_data_studio():
                             st.session_state["last_sync_time"] = datetime.now().strftime("%Y-%m-%d %H:%M")
                             st.success(
                                 f"已从云端拉取并覆盖本地 "
-                                f"({len(df_cloud)} 行 x "
-                                f"{len(df_cloud.columns)} 列)"
+                                f"({len(df_cloud)} 行 x {len(df_cloud.columns)} 列)"
                             )
-                            # 5. 强制重载
                             st.rerun()
                     except Exception as e:
                         st.error(f"云端拉取失败: {str(e)}")
@@ -988,231 +970,28 @@ def render_data_studio():
                     width="stretch", key="gs_push", type="primary",
                 ):
                     try:
-                        # 1. 先保存本地
                         current_df = st.session_state["df"]
                         db_save(current_df)
-                        # 2. 清洗 NaN 后全量覆盖到 Google Sheets
-                        conn = st.connection(
-                            "gsheets", type=GSheetsConnection
-                        )
-                        clean_df = current_df.fillna("")
-                        conn.update(data=clean_df)
+                        conn = st.connection("gsheets", type=GSheetsConnection)
+                        conn.update(data=current_df.fillna(""))
                         st.session_state["last_sync_time"] = datetime.now().strftime("%Y-%m-%d %H:%M")
                         st.toast("云端同步已完成")
                     except Exception as e:
                         st.error(f"云端同步失败: {str(e)}")
                         st.markdown(
                             "**排查建议**: 请检查 Google Sheet 是否已"
-                            "分享给 Service Account 邮箱, 并赋予 "
-                            "**Editor** 权限。"
+                            "分享给 Service Account 邮箱, 并赋予 **Editor** 权限。"
                         )
-
             st.caption(
-                "Pull = 云端数据覆盖本地 | "
-                "Push = 本地数据全量覆盖云端 | "
-                "日常编辑自动保存至本地数据库, 不依赖网络。"
+                "Pull = 云端覆盖本地 | Push = 本地覆盖云端 | "
+                "日常编辑自动保存至本地数据库。"
+            )
+            st.markdown(
+                '<hr style="border:none; border-top:1px solid #E8E8E8; margin:0.5rem 0;">',
+                unsafe_allow_html=True,
             )
 
-    # === 1. 实验背景 ===
-    st.markdown(
-        '<div class="area-title"><span class="area-number">01</span> 实验背景</div>',
-        unsafe_allow_html=True,
-    )
-    c1, c2 = st.columns(2)
-    with c1:
-        mat = st.text_input(
-            "材料 / 项目名称",
-            value=st.session_state["material_name"],
-            placeholder="例如: 碳化硅 SiC、GaN 外延片、钙钛矿太阳能电池",
-            key="ds_material",
-        )
-    with c2:
-        eqp = st.text_input(
-            "实验设备 / 工艺",
-            value=st.session_state["equipment_name"],
-            placeholder="例如: PVT 长晶炉、MOCVD、磁控溅射",
-            key="ds_equipment",
-        )
-    st.session_state["material_name"] = mat
-    st.session_state["equipment_name"] = eqp
-
-    st.markdown('<hr class="section-divider">', unsafe_allow_html=True)
-
-    # === 2. 列管理工具栏 + 数据编辑 ===
-    st.markdown(
-        '<div class="area-title">'
-        '<span class="area-number">02</span> 列管理与数据编辑'
-        '</div>',
-        unsafe_allow_html=True,
-    )
-
-    # ---- 紧凑列操作工具栏 ----
-    cols_list = df.columns.tolist()
-    tb1, tb2, tb3 = st.columns([2, 2, 3])
-
-    with tb1:
-        st.caption("新增列")
-        ncn = st.text_input(
-            "新列名", key="new_col_name", placeholder="输入列名",
-            label_visibility="collapsed",
-        )
-        if st.button("添加列", key="add_col_btn"):
-            name = (ncn or "").strip()
-            if name and name not in df.columns:
-                new = df.copy()
-                new[name] = 0.0
-                st.session_state["df"] = new
-                db_save(new)
-                _clear_editor_widget()
-                st.rerun()
-            elif not name:
-                st.warning("请输入列名。")
-            else:
-                st.warning("该列名已存在。")
-
-    with tb2:
-        st.caption("重命名列")
-        old_name = st.selectbox(
-            "选择列", cols_list, key="rename_select",
-            label_visibility="collapsed",
-        )
-        new_name_input = st.text_input(
-            "新名称", key="rename_input", placeholder="输入新名称",
-            label_visibility="collapsed",
-        )
-        if st.button("重命名", key="rename_btn"):
-            nn = (new_name_input or "").strip()
-            if nn and nn != old_name:
-                st.session_state["df"] = df.rename(columns={old_name: nn})
-                st.session_state["input_columns"] = [
-                    nn if c == old_name else c
-                    for c in st.session_state["input_columns"]
-                ]
-                st.session_state["output_columns"] = [
-                    nn if c == old_name else c
-                    for c in st.session_state["output_columns"]
-                ]
-                tv = st.session_state["target_values"]
-                if old_name in tv:
-                    tv[nn] = tv.pop(old_name)
-                db_save(st.session_state["df"])
-                _clear_editor_widget()
-                st.rerun()
-            elif nn == old_name:
-                st.warning("新旧列名相同，无需修改。")
-            else:
-                st.warning("请输入有效的新列名。")
-
-    with tb3:
-        st.caption("删除列")
-        del_cols = st.multiselect(
-            "选择要删除的列", cols_list, key="del_cols_select",
-            label_visibility="collapsed",
-        )
-        if del_cols:
-            if st.button("删除选中列", key="del_cols_btn", type="primary"):
-                st.session_state["df"] = df.drop(
-                    columns=del_cols, errors="ignore"
-                )
-                st.session_state["input_columns"] = [
-                    c for c in st.session_state["input_columns"]
-                    if c not in del_cols
-                ]
-                st.session_state["output_columns"] = [
-                    c for c in st.session_state["output_columns"]
-                    if c not in del_cols
-                ]
-                for c in del_cols:
-                    st.session_state["target_values"].pop(c, None)
-                db_save(st.session_state["df"])
-                _clear_editor_widget()
-                st.rerun()
-
-    # ---- 公式计算列 (第二行工具栏) ----
-    st.markdown(
-        '<hr style="border:none; border-top:1px solid #E8E8E8; margin:0.6rem 0;">',
-        unsafe_allow_html=True,
-    )
-    fc1, fc2, fc3 = st.columns([2, 4, 1])
-    with fc1:
-        st.caption("公式计算列")
-        formula_col_name = st.text_input(
-            "新列名", key="formula_col_name", placeholder="例如: 密度",
-            label_visibility="collapsed",
-        )
-    with fc2:
-        st.caption("计算公式 (用反引号包裹列名)")
-        formula_expr = st.text_input(
-            "公式", key="formula_expr",
-            placeholder="例如: `生长速率(um/h)` / `微管密度(cm-2)`",
-            label_visibility="collapsed",
-        )
-    with fc3:
-        st.caption(" ")  # 对齐占位
-        calc_btn = st.button("计算并添加", key="calc_col_btn", type="primary")
-
-    if calc_btn:
-        f_name = (formula_col_name or "").strip()
-        f_expr = (formula_expr or "").strip()
-        if not f_name:
-            st.error("请输入新列名。")
-        elif not f_expr:
-            st.error("请输入计算公式。")
-        elif f_name in df.columns:
-            st.error(f"列 \"{f_name}\" 已存在，请使用其他名称。")
-        else:
-            try:
-                # 方案 1: 直接用 pandas eval (支持反引号包裹的列名)
-                result = df.eval(f_expr)
-                new_df = df.copy()
-                new_df[f_name] = result
-                st.session_state["df"] = new_df
-                db_save(new_df)
-                _clear_editor_widget()
-                st.rerun()
-            except Exception as e1:
-                # 方案 2: 将列名映射为安全别名后再 eval
-                try:
-                    alias_map = {
-                        col: f"_c{i}_" for i, col in enumerate(df.columns)
-                    }
-                    reverse_map = {v: k for k, v in alias_map.items()}
-                    safe_df = df.rename(columns=alias_map)
-
-                    safe_expr = f_expr
-                    # 按列名长度从长到短替换，避免子串冲突
-                    for col in sorted(
-                        df.columns, key=len, reverse=True
-                    ):
-                        safe_expr = safe_expr.replace(
-                            f"`{col}`", alias_map[col]
-                        )
-
-                    result = safe_df.eval(safe_expr)
-                    new_df = df.copy()
-                    new_df[f_name] = result
-                    st.session_state["df"] = new_df
-                    db_save(new_df)
-                    _clear_editor_widget()
-                    st.rerun()
-                except Exception:
-                    st.error(
-                        f"公式计算失败: {e1}\n\n"
-                        f"**正确格式示例:**\n"
-                        f"- `` `列A` + `列B` ``\n"
-                        f"- `` `列A` / `列B` * 100 ``\n"
-                        f"- `` (`列A` - `列B`).abs() ``\n\n"
-                        f"当前可用列名: {', '.join(df.columns.tolist())}"
-                    )
-
-    st.caption(
-        "注: 在此处管理列结构, 在下方表格编辑数据。"
-        "公式中请用反引号 ` 包裹列名, 支持 +, -, *, / 及括号运算。"
-    )
-
-    # ---- 本地文件存取 ----
-    with st.container(border=True):
-        st.caption("本地文件存取")
+        # ---- 本地文件存取 (所有人可见) ----
         lc1, lc2 = st.columns(2)
         with lc1:
             csv_bytes = df.to_csv(index=False).encode("utf-8")
@@ -1242,14 +1021,251 @@ def render_data_studio():
                 except Exception as e:
                     st.error(f"CSV 解析失败: {e}")
 
-    # ---- 状态指示 + 数据编辑器 ----
+    # =================================================================
+    # 第二层: 表格结构与定义 (Schema & Definition)
+    # 左侧 = Popover 列管理 | 右侧 = 语义映射 + 目标设定
+    # =================================================================
+    st.markdown(
+        '<div class="area-title">'
+        '<span class="area-number">02</span> 结构定义与语义映射'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+
+    schema_left, schema_right = st.columns([1, 2])
+
+    # ---- 左侧: Popover 列管理 ----
+    with schema_left:
+        cols_list = df.columns.tolist()
+
+        with st.popover(":material/build: 表格结构管理", help="添加、重命名、删除列，或用公式生成新列"):
+            pop_tabs = st.tabs(["新增", "重命名", "删除", "公式列"])
+
+            with pop_tabs[0]:
+                ncn = st.text_input("新列名", key="new_col_name", placeholder="输入列名")
+                if st.button("立即创建", key="add_col_btn", type="primary", width="stretch"):
+                    name = (ncn or "").strip()
+                    if name and name not in df.columns:
+                        new = df.copy()
+                        new[name] = 0.0
+                        st.session_state["df"] = new
+                        db_save(new)
+                        _clear_editor_widget()
+                        st.rerun()
+                    elif not name:
+                        st.warning("请输入列名。")
+                    else:
+                        st.warning("该列名已存在。")
+
+            with pop_tabs[1]:
+                old_name = st.selectbox("选择列", cols_list, key="rename_select")
+                new_name_input = st.text_input("新名称", key="rename_input", placeholder="输入新名称")
+                if st.button("确认修改", key="rename_btn", width="stretch"):
+                    nn = (new_name_input or "").strip()
+                    if nn and nn != old_name:
+                        st.session_state["df"] = df.rename(columns={old_name: nn})
+                        st.session_state["input_columns"] = [
+                            nn if c == old_name else c for c in st.session_state["input_columns"]
+                        ]
+                        st.session_state["output_columns"] = [
+                            nn if c == old_name else c for c in st.session_state["output_columns"]
+                        ]
+                        tv = st.session_state["target_values"]
+                        if old_name in tv:
+                            tv[nn] = tv.pop(old_name)
+                        db_save(st.session_state["df"])
+                        _clear_editor_widget()
+                        st.rerun()
+                    elif nn == old_name:
+                        st.warning("新旧列名相同。")
+                    else:
+                        st.warning("请输入有效的新列名。")
+
+            with pop_tabs[2]:
+                del_cols = st.multiselect("选择要删除的列", cols_list, key="del_cols_select")
+                if st.button("确认删除", key="del_cols_btn", type="primary", width="stretch"):
+                    if del_cols:
+                        st.session_state["df"] = df.drop(columns=del_cols, errors="ignore")
+                        st.session_state["input_columns"] = [
+                            c for c in st.session_state["input_columns"] if c not in del_cols
+                        ]
+                        st.session_state["output_columns"] = [
+                            c for c in st.session_state["output_columns"] if c not in del_cols
+                        ]
+                        for c in del_cols:
+                            st.session_state["target_values"].pop(c, None)
+                        db_save(st.session_state["df"])
+                        _clear_editor_widget()
+                        st.rerun()
+                    else:
+                        st.warning("请先选择要删除的列。")
+
+            with pop_tabs[3]:
+                formula_col_name = st.text_input("新列名", key="formula_col_name", placeholder="例如: 密度")
+                formula_expr = st.text_input(
+                    "计算公式", key="formula_expr",
+                    placeholder="例如: `生长速率(um/h)` / `微管密度(cm-2)`",
+                )
+                st.caption("用反引号 ` 包裹列名, 支持 +, -, *, / 及括号运算。")
+                if st.button("计算并添加", key="calc_col_btn", type="primary", width="stretch"):
+                    f_name = (formula_col_name or "").strip()
+                    f_expr = (formula_expr or "").strip()
+                    if not f_name:
+                        st.error("请输入新列名。")
+                    elif not f_expr:
+                        st.error("请输入计算公式。")
+                    elif f_name in df.columns:
+                        st.error(f"列 \"{f_name}\" 已存在。")
+                    else:
+                        try:
+                            result = df.eval(f_expr)
+                            new_df = df.copy()
+                            new_df[f_name] = result
+                            st.session_state["df"] = new_df
+                            db_save(new_df)
+                            _clear_editor_widget()
+                            st.rerun()
+                        except Exception as e1:
+                            try:
+                                alias_map = {col: f"_c{i}_" for i, col in enumerate(df.columns)}
+                                safe_df = df.rename(columns=alias_map)
+                                safe_expr = f_expr
+                                for col in sorted(df.columns, key=len, reverse=True):
+                                    safe_expr = safe_expr.replace(f"`{col}`", alias_map[col])
+                                result = safe_df.eval(safe_expr)
+                                new_df = df.copy()
+                                new_df[f_name] = result
+                                st.session_state["df"] = new_df
+                                db_save(new_df)
+                                _clear_editor_widget()
+                                st.rerun()
+                            except Exception:
+                                st.error(
+                                    f"公式计算失败: {e1}\n\n"
+                                    f"**正确格式示例:**\n"
+                                    f"- `` `列A` + `列B` ``\n"
+                                    f"- `` `列A` / `列B` * 100 ``\n\n"
+                                    f"当前可用列名: {', '.join(df.columns.tolist())}"
+                                )
+
+        # 样品图片 (可选)
+        with st.expander("样品图片 (可选)"):
+            st.caption("上传 SEM / 光学显微镜图片，AI 将结合图像形貌分析")
+            up_img = st.file_uploader(
+                "上传图片", type=["png", "jpg", "jpeg"],
+                key="img_uploader", label_visibility="collapsed",
+            )
+            if up_img is not None:
+                img = Image.open(up_img)
+                st.image(img, caption=f"已上传: {up_img.name}", width="stretch")
+                st.session_state["sample_image"] = up_img.getvalue()
+                st.session_state["sample_image_name"] = up_img.name
+            elif st.session_state.get("sample_image"):
+                img = Image.open(io.BytesIO(st.session_state["sample_image"]))
+                st.image(
+                    img,
+                    caption=f"已保存: {st.session_state.get('sample_image_name', '')}",
+                    width="stretch",
+                )
+                if st.button("移除图片", key="rm_img_btn"):
+                    st.session_state["sample_image"] = None
+                    st.session_state["sample_image_name"] = None
+                    st.rerun()
+
+    # ---- 右侧: 语义映射与目标设定 ----
+    with schema_right:
+        st.markdown("""
+        <div class="mapping-info">
+            <strong>第一步:</strong> 选择参数列 (Inputs) 和结果列 (Outputs)。
+            <strong>第二步:</strong> 为结果列设定量化目标值。
+        </div>
+        """, unsafe_allow_html=True)
+
+        all_cols = st.session_state["df"].columns.tolist()
+        mc1, mc2 = st.columns(2)
+        with mc1:
+            inp = st.multiselect(
+                "Inputs (参数列) — 蓝色标记", all_cols,
+                default=[c for c in st.session_state["input_columns"] if c in all_cols],
+                help="实验中可以控制的变量",
+                key="sel_inputs",
+            )
+        with mc2:
+            avail_out = [c for c in all_cols if c not in inp]
+            out = st.multiselect(
+                "Outputs (结果列) — 橙色标记", avail_out,
+                default=[c for c in st.session_state["output_columns"] if c in avail_out],
+                help="想要优化的目标指标",
+                key="sel_outputs",
+            )
+
+        st.session_state["input_columns"] = inp
+        st.session_state["output_columns"] = out
+
+        # 映射标签预览
+        if inp or out:
+            tag_html = ""
+            if inp:
+                tag_html += "Inputs: " + " ".join(
+                    f'<span class="mapping-tag input">{c}</span>' for c in inp
+                )
+            if out:
+                tag_html += " &rarr; Outputs: " + " ".join(
+                    f'<span class="mapping-tag output">{c}</span>' for c in out
+                )
+            st.markdown(tag_html, unsafe_allow_html=True)
+
+        # 动态目标设定
+        tvs = dict(st.session_state.get("target_values", {}))
+        if out:
+            st.markdown(
+                '<div class="target-section">'
+                '<div class="target-section-title">设定各指标的目标值</div>'
+                '</div>',
+                unsafe_allow_html=True,
+            )
+            per_row = min(len(out), 3)
+            for i in range(0, len(out), per_row):
+                cols = st.columns(per_row)
+                for j, cn in enumerate(out[i: i + per_row]):
+                    with cols[j]:
+                        if cn in st.session_state["df"].columns:
+                            avg = pd.to_numeric(
+                                st.session_state["df"][cn], errors="coerce"
+                            ).mean()
+                            mx = pd.to_numeric(
+                                st.session_state["df"][cn], errors="coerce"
+                            ).max()
+                        else:
+                            avg, mx = 0.0, 0.0
+                        saved = tvs.get(cn, "")
+                        val = st.text_input(
+                            f"[{cn}] 目标值",
+                            value=str(saved) if saved else "",
+                            placeholder=f"均值 {avg:.2f}",
+                            help=f"当前均值: {avg:.2f}, 最优: {mx:.2f}",
+                            key=f"tgt_{cn}",
+                        )
+                        tvs[cn] = val
+                        st.caption(f"均值 {avg:.2f} / 最优 {mx:.2f}")
+
+        st.session_state["target_values"] = {k: v for k, v in tvs.items() if k in out}
+
+    # =================================================================
+    # 第三层: 数据表格 (The Grid)
+    # =================================================================
+    st.markdown(
+        '<div class="area-title">'
+        '<span class="area-number">03</span> 数据表格'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+
     status_area = st.empty()
     save_status = st.session_state.pop("_save_status", None)
     if save_status == "saved":
         status_area.markdown(
-            '<div class="hint-box">'
-            '<strong>状态:</strong> 所有更改已保存。'
-            '</div>',
+            '<div class="hint-box"><strong>状态:</strong> 所有更改已保存。</div>',
             unsafe_allow_html=True,
         )
     else:
@@ -1266,132 +1282,9 @@ def render_data_studio():
 
     st.data_editor(
         st.session_state["df"],
-        num_rows="dynamic", width="stretch", height=360,
+        num_rows="dynamic", width="stretch", height=420,
         key=editor_key, on_change=_on_editor_change,
     )
-
-    # ---- 样品图片 (可选) ----
-    with st.expander("样品图片 (可选)"):
-        st.caption("上传 SEM / 光学显微镜图片，AI 将结合图像形貌分析")
-        up_img = st.file_uploader(
-            "上传图片", type=["png", "jpg", "jpeg"],
-            key="img_uploader", label_visibility="collapsed",
-        )
-        if up_img is not None:
-            img = Image.open(up_img)
-            st.image(img, caption=f"已上传: {up_img.name}", width="stretch")
-            st.session_state["sample_image"] = up_img.getvalue()
-            st.session_state["sample_image_name"] = up_img.name
-        elif st.session_state.get("sample_image"):
-            img = Image.open(io.BytesIO(st.session_state["sample_image"]))
-            st.image(
-                img,
-                caption=f"已保存: {st.session_state.get('sample_image_name', '')}",
-                width="stretch",
-            )
-            if st.button("移除图片", key="rm_img_btn"):
-                st.session_state["sample_image"] = None
-                st.session_state["sample_image_name"] = None
-                st.rerun()
-
-    st.markdown('<hr class="section-divider">', unsafe_allow_html=True)
-
-    # === 3. 语义映射与目标设定 ===
-    st.markdown(
-        '<div class="area-title">'
-        '<span class="area-number">03</span> 语义映射与目标设定'
-        '</div>',
-        unsafe_allow_html=True,
-    )
-
-    st.markdown("""
-    <div class="mapping-info">
-        <strong>第一步:</strong> 选择参数列 (Inputs) 和结果列 (Outputs)。
-        <strong>第二步:</strong> 为结果列设定量化目标值。
-    </div>
-    """, unsafe_allow_html=True)
-
-    all_cols = st.session_state["df"].columns.tolist()
-    mc1, mc2 = st.columns(2)
-    with mc1:
-        inp = st.multiselect(
-            "Inputs (参数列) — 蓝色标记", all_cols,
-            default=[
-                c for c in st.session_state["input_columns"] if c in all_cols
-            ],
-            help="实验中可以控制的变量",
-            key="sel_inputs",
-        )
-    with mc2:
-        avail_out = [c for c in all_cols if c not in inp]
-        out = st.multiselect(
-            "Outputs (结果列) — 橙色标记", avail_out,
-            default=[
-                c for c in st.session_state["output_columns"]
-                if c in avail_out
-            ],
-            help="想要优化的目标指标",
-            key="sel_outputs",
-        )
-
-    st.session_state["input_columns"] = inp
-    st.session_state["output_columns"] = out
-
-    # 映射标签预览
-    if inp or out:
-        tag_html = ""
-        if inp:
-            tag_html += "Inputs: " + " ".join(
-                f'<span class="mapping-tag input">{c}</span>' for c in inp
-            )
-        if out:
-            tag_html += " &rarr; Outputs: " + " ".join(
-                f'<span class="mapping-tag output">{c}</span>' for c in out
-            )
-        st.markdown(tag_html, unsafe_allow_html=True)
-        st.info(
-            f"已将 [{', '.join(inp) or '无'}] 标记为蓝色, "
-            f"[{', '.join(out) or '无'}] 标记为橙色。"
-            f"切换到「智能仪表盘」标签页查看彩色表格效果。"
-        )
-
-    # ---- 动态目标设定 ----
-    tvs = dict(st.session_state.get("target_values", {}))
-    if out:
-        st.markdown(
-            '<div class="target-section">'
-            '<div class="target-section-title">设定各指标的目标值</div>'
-            '</div>',
-            unsafe_allow_html=True,
-        )
-        per_row = min(len(out), 3)
-        for i in range(0, len(out), per_row):
-            cols = st.columns(per_row)
-            for j, cn in enumerate(out[i: i + per_row]):
-                with cols[j]:
-                    if cn in st.session_state["df"].columns:
-                        avg = pd.to_numeric(
-                            st.session_state["df"][cn], errors="coerce"
-                        ).mean()
-                        mx = pd.to_numeric(
-                            st.session_state["df"][cn], errors="coerce"
-                        ).max()
-                    else:
-                        avg, mx = 0.0, 0.0
-                    saved = tvs.get(cn, "")
-                    val = st.text_input(
-                        f"[{cn}] 目标值",
-                        value=str(saved) if saved else "",
-                        placeholder=f"均值 {avg:.2f}",
-                        help=f"当前均值: {avg:.2f}, 最优: {mx:.2f}",
-                        key=f"tgt_{cn}",
-                    )
-                    tvs[cn] = val
-                    st.caption(f"均值 {avg:.2f} / 最优 {mx:.2f}")
-
-    st.session_state["target_values"] = {
-        k: v for k, v in tvs.items() if k in out
-    }
 
 
 # ============================================================
@@ -1772,26 +1665,12 @@ def render_dashboard():
                     """, unsafe_allow_html=True)
 
     # ---- AI 控制行 ----
-    bc1, bc2, bc3 = st.columns([1, 1, 2])
-    with bc1:
-        analyze_btn = st.button(
-            "AI 深度分析", width="stretch", type="primary",
-        )
-    with bc2:
-        pass
-    with bc3:
-        api = st.text_input(
-            "Gemini API Key",
-            value=st.session_state.get("api_key", ""),
-            type="password", placeholder="输入 Gemini API Key",
-            label_visibility="collapsed", key="api_key_input",
-        )
-        st.session_state["api_key"] = api
+    analyze_btn = st.button("AI 深度分析", type="primary")
 
     if analyze_btn:
         key = st.session_state.get("api_key", "")
         if not key:
-            st.warning("请先输入 Gemini API Key。")
+            st.warning("请先在「系统设置」页面配置 Gemini API Key。")
         elif df.empty:
             st.warning("请先在数据工作台录入实验数据。")
         else:
@@ -1923,115 +1802,7 @@ def render_dashboard():
             unsafe_allow_html=True,
         )
 
-    # ---- 导出报告 ----
-    st.markdown('<hr class="section-divider">', unsafe_allow_html=True)
-    rpt_col1, rpt_col2 = st.columns([1, 3])
-    with rpt_col1:
-        report_html = generate_html_report()
-        html_filename = f"Lab_Report_{datetime.now().strftime('%Y%m%d')}.html"
-        st.download_button(
-            "下载实验报告 (网页版)",
-            data=report_html.encode("utf-8"),
-            file_name=html_filename,
-            mime="text/html",
-            width="stretch",
-            type="primary",
-        )
-    with rpt_col2:
-        st.caption(
-            "模拟 A4 排版的 HTML 报告，双击即可在浏览器中查看。"
-            "包含: 项目信息、量化目标、完整数据表、统计摘要及 AI 分析结果。"
-        )
 
-
-# ============================================================
-# Data Copilot (智能问答助手)
-# ============================================================
-def render_data_copilot():
-    """基于当前 DataFrame 的 AI 问答助手，放在所有 Tab 下方。"""
-
-    st.markdown('<hr class="section-divider">', unsafe_allow_html=True)
-
-    with st.expander("智能问答助手 (Data Copilot) — 向 AI 提问关于数据的问题", expanded=False):
-
-        api_key = st.session_state.get("api_key", "")
-        if not api_key:
-            st.info(
-                "请先在仪表盘 (Dashboard) 中输入 Gemini API Key，"
-                "然后即可在此向 AI 提问。"
-            )
-
-        # 显示聊天历史
-        chat_container = st.container(height=400)
-        with chat_container:
-            if not st.session_state["chat_history"]:
-                st.markdown(
-                    '<div style="text-align:center; color:#999; padding:2rem 0;">'
-                    '暂无对话。在下方输入框中提问，AI 将基于当前数据表回答。'
-                    '</div>',
-                    unsafe_allow_html=True,
-                )
-            for msg in st.session_state["chat_history"]:
-                with st.chat_message(msg["role"]):
-                    st.markdown(msg["content"])
-
-        # 输入框
-        user_input = st.chat_input(
-            "输入问题，例如: 哪一次实验的微管密度最低？",
-            key="copilot_input",
-        )
-
-        if user_input:
-            if not api_key:
-                st.warning("请先在仪表盘中填写 Gemini API Key。")
-                return
-
-            # 追加用户消息
-            st.session_state["chat_history"].append(
-                {"role": "user", "content": user_input}
-            )
-
-            # 构造上下文
-            df = st.session_state["df"]
-            csv_str = df.to_csv(index=False)
-            inp = st.session_state.get("input_columns", [])
-            out = st.session_state.get("output_columns", [])
-            mat = st.session_state.get("material_name", "")
-
-            system_prompt = (
-                "你是一个专业的实验数据分析助手。"
-                "请根据以下实验数据回答用户问题。"
-                "用简洁、专业的语言回答。"
-                "如果数据中找不到答案，请诚实告知。\n\n"
-                f"研究材料: {mat or '未指定'}\n"
-                f"参数列 (Inputs): {', '.join(inp) or '未指定'}\n"
-                f"结果列 (Outputs): {', '.join(out) or '未指定'}\n\n"
-                f"当前数据表 (CSV):\n```\n{csv_str}\n```"
-            )
-
-            # 拼接最近对话作为上下文 (最多保留最近 10 轮)
-            recent = st.session_state["chat_history"][-20:]
-            conversation = ""
-            for msg in recent[:-1]:  # 排除刚追加的当前用户消息
-                role_label = "用户" if msg["role"] == "user" else "助手"
-                conversation += f"{role_label}: {msg['content']}\n\n"
-            conversation += f"用户: {user_input}"
-
-            try:
-                genai.configure(api_key=api_key)
-                model = genai.GenerativeModel(
-                    "gemini-2.0-flash",
-                    system_instruction=system_prompt,
-                )
-                response = model.generate_content(conversation)
-                answer = response.text
-            except Exception as e:
-                answer = f"AI 回答失败: {str(e)}"
-
-            st.session_state["chat_history"].append(
-                {"role": "assistant", "content": answer}
-            )
-            st.rerun()
 
 
 # ============================================================
@@ -2064,9 +1835,6 @@ def main():
 
     else:
         render_portal_home()
-
-    # 智能问答助手 (全局)
-    render_data_copilot()
 
     # 页脚
     st.markdown(
