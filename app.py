@@ -1,5 +1,5 @@
 """
-NEXUS Lab — Dual-Mode Materials R&D Platform
+JPZ 科研平台 — Dual-Mode Materials R&D Platform
 Clinical White Theme | Guest / Admin | Google Sheets Sync
 """
 
@@ -15,6 +15,8 @@ import io
 import sqlite3
 import os
 
+from translations import TRANSLATIONS
+
 try:
     from streamlit_gsheets import GSheetsConnection
     GSHEETS_AVAILABLE = True
@@ -28,9 +30,17 @@ except ImportError:
     SORTABLES_AVAILABLE = False
 
 
-# ============================================================
-# SQLite Local Database
-# ============================================================
+# --- i18n Helper ---
+def T(key: str, **kwargs) -> str:
+    """Return the translated string for the current language."""
+    lang = st.session_state.get("language", "en")
+    text = TRANSLATIONS.get(lang, TRANSLATIONS["en"]).get(key, key)
+    if kwargs:
+        text = text.format(**kwargs)
+    return text
+
+
+# --- SQLite Local Database ---
 _APP_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(_APP_DIR, "lab_storage.db")
 _OLD_DB_PATH = os.path.join(_APP_DIR, "research_data.db")
@@ -132,219 +142,156 @@ def _migrate_old_db():
 _migrate_old_db()
 
 
-# ============================================================
-# Page Config
-# ============================================================
-st.set_page_config(
-    page_title="NEXUS Lab",
-    page_icon=None,
-    layout="wide",
-)
+# --- Page Config ---
+st.set_page_config(page_title="JPZ Platform", page_icon=None, layout="wide")
 
-
-# ============================================================
-# CSS — Portal Theme
-# ============================================================
-ACCENT = "#007AFF"
+ACCENT = "#0047AB"
 
 st.markdown(f"""
 <style>
-    /* === Hide Streamlit native UI === */
-    #MainMenu {{visibility: hidden;}}
-    footer {{visibility: hidden;}}
-    header[data-testid="stHeader"] {{
-        visibility: hidden !important; height: 0 !important;
-        min-height: 0 !important; padding: 0 !important;
-        margin: 0 !important; overflow: hidden !important;
-    }}
-    .stDeployButton {{display: none !important;}}
-    section[data-testid="stSidebar"] {{display: none !important;}}
-    button[data-testid="stSidebarCollapseButton"] {{display: none !important;}}
+    #MainMenu {{visibility:hidden;}}
+    footer {{visibility:hidden;}}
+    header[data-testid="stHeader"] {{visibility:hidden!important;height:0!important;min-height:0!important;padding:0!important;margin:0!important;overflow:hidden!important;}}
+    .stDeployButton {{display:none!important;}}
+    section[data-testid="stSidebar"] {{display:none!important;}}
+    button[data-testid="stSidebarCollapseButton"] {{display:none!important;}}
 
-    /* === Global === */
-    .stApp {{background-color: #F8F9FA;}}
-    html, body, [class*="css"] {{
-        font-family: 'PingFang SC', 'Microsoft YaHei', -apple-system,
-                     BlinkMacSystemFont, 'Segoe UI', sans-serif !important;
-        color: #333333;
+    .stApp {{background:#FFFFFF;}}
+    html,body,[class*="css"] {{
+        font-family:'PingFang SC','Microsoft YaHei',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif!important;
+        color:#1D1D1F;
     }}
 
-    /* === Header Bar === */
-    .portal-header {{
-        background: #FFFFFF; border-bottom: 2px solid {ACCENT};
-        box-shadow: 0 1px 4px rgba(0,0,0,0.06);
-        padding: 0.55rem 0; margin-bottom: 1rem;
-    }}
-    .portal-header .logo {{
-        font-size: 1.4rem; font-weight: 800; color: #1a1a1a;
-        letter-spacing: 0.5px;
-    }}
-    .portal-header .logo .accent {{color: {ACCENT};}}
+    .portal-header {{padding:0.7rem 0;margin-bottom:0.5rem;border-bottom:1px solid #E5E5E5;}}
+    .portal-header .logo {{font-size:1.35rem;font-weight:800;color:#1D1D1F;letter-spacing:-0.3px;}}
+    .portal-header .logo .accent {{color:{ACCENT};}}
     .portal-header .badge {{
-        display: inline-block; font-size: 0.6rem; padding: 0.1rem 0.45rem;
-        border-radius: 99px; margin-left: 0.5rem; font-weight: 600;
-        vertical-align: middle;
+        display:inline-block;font-size:0.55rem;padding:0.1rem 0.5rem;border-radius:99px;
+        margin-left:0.5rem;font-weight:600;vertical-align:middle;letter-spacing:0.5px;
     }}
-    .badge-guest {{background: #F1F5F9; color: #64748B; border: 1px solid #E2E8F0;}}
-    .badge-admin {{background: #EFF6FF; color: {ACCENT}; border: 1px solid #BFDBFE;}}
+    .badge-guest {{background:#F5F5F7;color:#86868B;border:1px solid #E5E5E5;}}
+    .badge-admin {{background:#EEF2FF;color:{ACCENT};border:1px solid #C7D2FE;}}
 
-    /* === Stats Bar === */
     .stats-bar {{
-        background: #FFFFFF; border: 1px solid #E8E8E8; border-radius: 10px;
-        padding: 0.9rem 1.4rem; margin-bottom: 1.2rem;
-        display: flex; gap: 2.5rem; flex-wrap: wrap; align-items: center;
+        background:#FFFFFF;border:1px solid #E5E5E5;border-radius:14px;
+        padding:1rem 1.5rem;margin-bottom:1.5rem;
+        display:flex;gap:3rem;flex-wrap:wrap;align-items:center;
     }}
-    .stat-item {{}}
-    .stat-label {{font-size: 0.65rem; color: #888; text-transform: uppercase; letter-spacing: 0.8px;}}
-    .stat-value {{font-size: 1.15rem; font-weight: 700; color: #333;}}
-    .stat-value.accent {{color: {ACCENT};}}
+    .stat-label {{font-size:0.6rem;color:#86868B;text-transform:uppercase;letter-spacing:1px;}}
+    .stat-value {{font-size:1.3rem;font-weight:800;color:#1D1D1F;}}
+    .stat-value.accent {{color:{ACCENT};}}
 
-    /* === Popover === */
-    [data-testid="stPopover"] > div {{min-width: 260px;}}
+    [data-testid="stPopover"] > div {{min-width:260px;}}
 
-    /* === Portal Tiles === */
-    .tile {{
-        background: #FFFFFF; border: 1px solid #E2E6EA; border-radius: 10px;
-        padding: 1.3rem 1.2rem; text-align: center; cursor: pointer;
-        transition: all 0.2s ease; min-height: 120px;
-        display: flex; flex-direction: column; justify-content: center;
-    }}
-    .tile:hover {{border-color: {ACCENT}; box-shadow: 0 4px 12px rgba(0,122,255,0.1);}}
-    .tile-title {{font-size: 0.95rem; font-weight: 700; color: #333; margin-top: 0.6rem;}}
-    .tile-desc {{font-size: 0.75rem; color: #888; margin-top: 0.25rem;}}
-    .tile-disabled {{opacity: 0.45; pointer-events: none;}}
-
-    /* === Section Titles === */
     .area-title {{
-        font-size: 1.05rem; font-weight: 600; color: #333;
-        margin-bottom: 0.8rem; padding-bottom: 0.4rem;
-        border-bottom: 2px solid {ACCENT}; display: inline-block;
+        font-size:0.95rem;font-weight:700;color:#1D1D1F;
+        margin-bottom:1rem;padding-bottom:0.35rem;
+        border-bottom:2px solid {ACCENT};display:inline-block;
     }}
-    .area-number {{color: {ACCENT}; font-weight: 700;}}
-    .section-divider {{border: none; border-top: 1px solid #E8E8E8; margin: 1.5rem 0;}}
+    .area-number {{color:{ACCENT};font-weight:800;}}
+    .section-divider {{border:none;border-top:1px solid #E5E5E5;margin:2rem 0;}}
 
-    /* === Cards (project, target, AI, action) === */
     .project-card {{
-        background: linear-gradient(135deg, #F8FAFF 0%, #F0F5FF 100%);
-        border: 1px solid #D0E0F5; border-radius: 10px;
-        padding: 1.1rem 1.4rem; margin-bottom: 1.2rem;
+        background:#FFFFFF;border:1px solid #E5E5E5;border-radius:14px;
+        padding:1.2rem 1.5rem;margin-bottom:1rem;
     }}
-    .project-label {{font-size: 0.7rem; color: #888; text-transform: uppercase; letter-spacing: 1px;}}
-    .project-value {{font-size: 1rem; font-weight: 600; color: #333; margin-top: 0.15rem;}}
-    .target-card {{
-        background: #F0FDF4; border: 1px solid #86EFAC; border-radius: 8px;
-        padding: 0.7rem 1rem; margin-bottom: 0.5rem;
-    }}
-    .target-label  {{font-size: 0.75rem; color: #166534; font-weight: 600;}}
-    .target-value  {{font-size: 1.1rem; font-weight: 700; color: #15803D;}}
-    .current-value {{font-size: 0.8rem; color: #666;}}
-    .data-summary {{
-        background: #FFFFFF; border: 1px solid #E0E0E0; border-radius: 8px;
-        padding: 0.9rem 1.2rem; margin-bottom: 1rem;
-    }}
-    .summary-item  {{display: inline-block; margin-right: 2rem;}}
-    .summary-label {{font-size: 0.7rem; color: #888; text-transform: uppercase;}}
-    .summary-value {{font-size: 1.2rem; font-weight: 700; color: #333;}}
-    .insight-card {{
-        background: linear-gradient(135deg, #FAFBFF, #F5F8FF);
-        border: 1px solid #D0E0F5; border-left: 4px solid {ACCENT};
-        border-radius: 8px; padding: 1.4rem; margin-bottom: 1rem;
-    }}
-    .insight-title {{
-        font-size: 0.85rem; font-weight: 700; color: {ACCENT};
-        text-transform: uppercase; letter-spacing: 1px; margin-bottom: 0.8rem;
-    }}
-    .action-card {{
-        background: linear-gradient(135deg, #F8FFFE, #F0FDF9);
-        border: 1px solid #A7E8D8; border-left: 4px solid #10B981;
-        border-radius: 8px; padding: 1.4rem; margin-bottom: 1rem;
-    }}
-    .action-title {{
-        font-size: 0.85rem; font-weight: 700; color: #10B981;
-        text-transform: uppercase; letter-spacing: 1px; margin-bottom: 0.8rem;
-    }}
+    .project-label {{font-size:0.65rem;color:#86868B;text-transform:uppercase;letter-spacing:1px;}}
+    .project-value {{font-size:1rem;font-weight:600;color:#1D1D1F;margin-top:0.15rem;}}
 
-    /* === Mapping / Target / Hint === */
+    .target-card {{
+        background:#FFFFFF;border:1px solid #E5E5E5;border-left:3px solid {ACCENT};
+        border-radius:12px;padding:0.8rem 1rem;margin-bottom:0.5rem;
+    }}
+    .target-label {{font-size:0.7rem;color:#86868B;font-weight:600;}}
+    .target-value {{font-size:1.05rem;font-weight:700;color:{ACCENT};}}
+    .current-value {{font-size:0.75rem;color:#86868B;}}
+
+    .data-summary {{
+        background:#FFFFFF;border:1px solid #E5E5E5;border-radius:14px;
+        padding:1rem 1.3rem;margin-bottom:1rem;
+    }}
+    .summary-item {{display:inline-block;margin-right:2.5rem;}}
+    .summary-label {{font-size:0.6rem;color:#86868B;text-transform:uppercase;letter-spacing:0.5px;}}
+    .summary-value {{font-size:1.2rem;font-weight:800;color:#1D1D1F;}}
+
+    .insight-card {{
+        background:#FFFFFF;border:1px solid #E5E5E5;border-left:3px solid {ACCENT};
+        border-radius:14px;padding:1.5rem;margin-bottom:1rem;
+    }}
+    .insight-title {{font-size:0.8rem;font-weight:700;color:{ACCENT};text-transform:uppercase;letter-spacing:1px;margin-bottom:0.8rem;}}
+    .action-card {{
+        background:#FFFFFF;border:1px solid #E5E5E5;border-left:3px solid #10B981;
+        border-radius:14px;padding:1.5rem;margin-bottom:1rem;
+    }}
+    .action-title {{font-size:0.8rem;font-weight:700;color:#10B981;text-transform:uppercase;letter-spacing:1px;margin-bottom:0.8rem;}}
+
     .mapping-info {{
-        background: #FFF8F0; border: 1px solid #FFD6A5; border-radius: 6px;
-        padding: 0.7rem 1rem; font-size: 0.85rem; color: #666; margin-bottom: 1rem;
+        background:#FFFFFF;border:1px solid #E5E5E5;border-left:3px solid {ACCENT};
+        border-radius:12px;padding:0.8rem 1rem;font-size:0.85rem;color:#86868B;margin-bottom:1rem;
     }}
-    .mapping-tag {{display: inline-block; border-radius: 4px; padding: 0.15rem 0.45rem; font-size: 0.8rem; margin: 0.15rem;}}
-    .mapping-tag.input  {{background: #DBEAFE; color: #1D4ED8;}}
-    .mapping-tag.output {{background: #FFF0E6; color: #C2410C;}}
+    .mapping-tag {{display:inline-block;border-radius:6px;padding:0.15rem 0.5rem;font-size:0.75rem;font-weight:600;margin:0.15rem;}}
+    .mapping-tag.input {{background:#EEF2FF;color:{ACCENT};}}
+    .mapping-tag.output {{background:#FFF7ED;color:#C2410C;}}
+
     .target-section {{
-        background: #FEFCE8; border: 1px solid #FEF08A; border-radius: 8px;
-        padding: 0.9rem 1.1rem; margin-top: 0.8rem;
+        background:#FFFFFF;border:1px solid #E5E5E5;border-radius:12px;
+        padding:1rem 1.1rem;margin-top:0.8rem;
     }}
-    .target-section-title {{font-size: 0.85rem; font-weight: 600; color: #854D0E; margin-bottom: 0.6rem;}}
+    .target-section-title {{font-size:0.8rem;font-weight:600;color:#1D1D1F;margin-bottom:0.6rem;}}
+
     .hint-box {{
-        background: #F0F7FF; border: 1px solid #BFDBFE; border-radius: 6px;
-        padding: 0.7rem 1rem; font-size: 0.85rem; color: #1E40AF; margin-bottom: 0.8rem;
+        background:#FFFFFF;border:1px solid #E5E5E5;border-left:3px solid {ACCENT};
+        border-radius:12px;padding:0.75rem 1rem;font-size:0.82rem;color:#1D1D1F;margin-bottom:1rem;
     }}
     .placeholder-box {{
-        background: #FFFFFF; border: 1px dashed #D0D0D0; border-radius: 8px;
-        padding: 2.5rem; text-align: center; color: #999;
+        background:#FFFFFF;border:1px dashed #D0D0D0;border-radius:14px;
+        padding:3rem;text-align:center;color:#86868B;font-size:0.9rem;
     }}
 
-    /* === Recent Data Table === */
-    .recent-section {{
-        background: #FFFFFF; border: 1px solid #E2E6EA; border-radius: 10px;
-        padding: 1.2rem 1.4rem; margin-top: 1rem;
-    }}
-    .recent-title {{font-size: 0.95rem; font-weight: 700; color: #333; margin-bottom: 0.6rem;}}
+    .recent-title {{font-size:0.9rem;font-weight:700;color:#1D1D1F;margin-bottom:0.5rem;}}
 
-    /* === Buttons === */
     .stButton > button {{
-        border-radius: 6px; font-weight: 600; transition: all 0.15s ease;
-        background: #FFFFFF; color: #333; border: 1px solid #D0D0D0;
+        border-radius:8px;font-weight:600;transition:all 0.15s ease;
+        background:#FFFFFF;color:#1D1D1F;border:1px solid #E5E5E5;
     }}
-    .stButton > button:hover {{border-color: {ACCENT}; color: {ACCENT};}}
+    .stButton > button:hover {{border-color:{ACCENT};color:{ACCENT};}}
     .stButton > button[kind="primary"],
     .stButton > button[data-testid="stBaseButton-primary"] {{
-        background: {ACCENT} !important; color: #FFF !important;
-        border: none !important; border-radius: 6px !important;
+        background:{ACCENT}!important;color:#FFF!important;
+        border:none!important;border-radius:8px!important;
     }}
     .stButton > button[kind="primary"]:hover,
     .stButton > button[data-testid="stBaseButton-primary"]:hover {{
-        background: #0066DD !important;
+        background:#003A8C!important;
     }}
 
-    /* === Tabs === */
     .stTabs [data-baseweb="tab-list"] button[aria-selected="true"] {{
-        border-bottom-color: {ACCENT} !important; color: {ACCENT} !important; font-weight: 600;
+        border-bottom-color:{ACCENT}!important;color:{ACCENT}!important;font-weight:600;
     }}
-    .stTabs [data-baseweb="tab-list"] button {{color: #888;}}
+    .stTabs [data-baseweb="tab-list"] button {{color:#86868B;}}
 
-    /* === Footer === */
-    .app-footer {{
-        text-align: center; color: #AAA; font-size: 0.8rem;
-        padding: 1.5rem 0; border-top: 1px solid #E8E8E8; margin-top: 1.5rem;
-    }}
+    .app-footer {{text-align:center;color:#86868B;font-size:0.75rem;padding:2rem 0;margin-top:2rem;}}
 
-    /* === Layout Spacing === */
     .main .block-container {{
-        padding-top: 1.2rem !important;
-        padding-left: 2.5rem; padding-right: 2.5rem; padding-bottom: 2rem;
+        padding-top:1.2rem!important;
+        padding-left:3rem;padding-right:3rem;padding-bottom:2rem;
     }}
 
-    /* === Inputs === */
     .stTextInput > div > div > input,
     .stTextArea > div > div > textarea,
     .stNumberInput > div > div > input {{
-        background: #FFF; border: 1px solid #E0E0E0; border-radius: 4px; color: #333;
+        background:#FFFFFF;border:1px solid #E5E5E5;border-radius:8px;color:#1D1D1F;
     }}
     .stTextInput > div > div > input:focus,
     .stTextArea > div > div > textarea:focus,
     .stNumberInput > div > div > input:focus {{
-        border-color: {ACCENT}; box-shadow: 0 0 0 2px rgba(0,122,255,0.1);
+        border-color:{ACCENT};box-shadow:0 0 0 2px rgba(0,71,171,0.08);
     }}
 </style>
 """, unsafe_allow_html=True)
 
 
-# ============================================================
-# Session State
-# ============================================================
+# --- Session State ---
 def _get_sample_df() -> pd.DataFrame:
     """最小示例数据，确保 DataFrame 至少有列名和一行数据。"""
     return pd.DataFrame({
@@ -368,6 +315,7 @@ def init_session_state():
         db_save(starting_df)
 
     defaults = {
+        "language": "en",
         "user_role": "guest",
         "material_name": "",
         "equipment_name": "",
@@ -393,9 +341,7 @@ def init_session_state():
             st.session_state[key] = val
 
 
-# ============================================================
-# Utilities
-# ============================================================
+# --- Utilities ---
 def _clear_editor_widget():
     """清除 data_editor widget state 并递增版本号，强制组件刷新。"""
     ver = st.session_state.get("editor_version", 0)
@@ -469,12 +415,11 @@ def _on_editor_change():
 
 
 def style_dataframe(df: pd.DataFrame, input_cols: list, output_cols: list):
-    """Light-mode Styler: Input cols -> light blue, Output cols -> light orange."""
     def _color(col: pd.Series) -> list[str]:
         if col.name in input_cols:
-            return ["background-color: #E6F3FF"] * len(col)
+            return ["background-color: #EEF2FF"] * len(col)
         if col.name in output_cols:
-            return ["background-color: #FFF0E6"] * len(col)
+            return ["background-color: #FFF7ED"] * len(col)
         return [""] * len(col)
     return df.style.apply(_color, axis=0)
 
@@ -486,9 +431,9 @@ def create_trend_chart(
 
     if not output_cols or df.empty:
         fig.add_annotation(
-            text="请在数据工作台选择 Output 列以显示趋势图",
+            text=T("no_output_for_trend"),
             xref="paper", yref="paper", x=0.5, y=0.5,
-            showarrow=False, font=dict(color="#999"),
+            showarrow=False, font=dict(color="#86868B"),
         )
         fig.update_layout(height=300)
         return fig
@@ -508,18 +453,18 @@ def create_trend_chart(
         tv = target_values.get(col, "")
         if tv:
             try:
-                fig.add_hline(
-                    y=float(tv), line_dash="dash", line_color=c,
-                    annotation_text=f"目标: {tv}",
-                    annotation_position="right", annotation_font_color=c,
-                )
+                    fig.add_hline(
+                        y=float(tv), line_dash="dash", line_color=c,
+                        annotation_text=T("target_annotation", val=tv),
+                        annotation_position="right", annotation_font_color=c,
+                    )
             except (ValueError, TypeError):
                 pass
 
     fig.update_layout(
         template="simple_white",
-        title=dict(text="结果趋势 (虚线 = 目标值)", font=dict(size=14)),
-        xaxis_title="实验编号", yaxis_title="数值",
+        title=dict(text=T("trend_chart_title"), font=dict(size=14)),
+        xaxis_title=T("experiment_number"), yaxis_title=T("value_label"),
         height=320, margin=dict(t=50, b=40, l=50, r=100),
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
     )
@@ -528,9 +473,7 @@ def create_trend_chart(
     return fig
 
 
-# ============================================================
-# AI Analysis (Gemini)
-# ============================================================
+# --- AI Analysis (Gemini) ---
 def analyze_with_ai(
     df: pd.DataFrame, material: str, equipment: str,
     input_cols: list, output_cols: list, target_values: dict,
@@ -552,62 +495,42 @@ def analyze_with_ai(
                 gap = float(tv) - avg
                 pct = (gap / avg * 100) if avg != 0 else 0
                 t_lines.append(
-                    f"- {col}: 目标值={tv}, 当前均值={avg:.2f}, "
-                    f"最优={best:.2f}, 差距={gap:.2f} ({pct:+.1f}%)"
+                    T("ai_target_line", col=col, tv=tv, avg=avg, best=best, gap=gap, pct=pct)
                 )
             else:
                 t_lines.append(
-                    f"- {col}: 未设定目标, 当前均值={avg:.2f}, 最优={best:.2f}"
+                    T("ai_target_line_no_target", col=col, avg=avg, best=best)
                 )
-        target_str = "\n".join(t_lines) if t_lines else "(用户未设定具体目标)"
+        target_str = "\n".join(t_lines) if t_lines else T("ai_no_target")
 
         has_image = image_bytes is not None
         img_instr = ""
         if has_image:
-            img_instr = (
-                "\n5. 仔细观察用户上传的样品微观结构图"
-                "\n6. 分析图像中的形貌特征（晶粒大小、裂纹、孔隙、颜色异常等）"
-                "\n7. 将图像观察与实验参数关联，推断工艺-形貌-性能的因果关系"
-            )
+            img_instr = T("ai_img_instr")
 
         custom_instr = ""
         if custom_prompt and custom_prompt.strip():
-            custom_instr = (
-                f"\n\n用户已设定以下具体分析要求，请务必结合数据进行针对性分析:\n"
-                f"「{custom_prompt.strip()}」"
-            )
+            custom_instr = T("ai_custom_instr", prompt=custom_prompt.strip())
 
-        system_prompt = (
-            f"你是一位世界顶级的材料科学家和工艺工程师。\n"
-            f"用户正在进行【{material or '材料'}】的研究。\n"
-            f"使用的设备/工艺是：【{equipment or '实验设备'}】。\n\n"
-            f"你的任务是帮助用户达成量化目标。\n"
-            f"1. 精确指出当前数据与目标值的差距\n"
-            f"2. 结合物理/化学原理解释瓶颈\n"
-            f"3. 给出能够逼近目标值的具体参数建议\n"
-            f"4. 如果目标不切实际，诚实指出{img_instr}{custom_instr}"
+        _mat_default = "Material" if st.session_state.get("language", "en") == "en" else "材料"
+        _eq_default = "Equipment" if st.session_state.get("language", "en") == "en" else "实验设备"
+        system_prompt = T(
+            "ai_system_prompt",
+            material=material or _mat_default,
+            equipment=equipment or _eq_default,
+            img_instr=img_instr,
+            custom_instr=custom_instr,
         )
 
-        in_str = ", ".join(input_cols) if input_cols else "(用户未指定)"
+        in_str = ", ".join(input_cols) if input_cols else T("ai_input_not_specified")
 
         if has_image:
-            user_prompt = (
-                f"## 实验数据\n```csv\n{csv_str}\n```\n\n"
-                f"## 数据列说明\n- 实验参数列 (可调变量): {in_str}\n\n"
-                f"## 用户的量化目标\n{target_str}\n\n"
-                f"## 样品图像\n用户上传了一张样品的微观结构图。请仔细观察。\n\n---\n\n"
-                f"请按以下结构分析:\n\n"
-                f"### 一、图像形貌分析\n### 二、数据-图像关联分析\n"
-                f"### 三、瓶颈机理分析\n### 四、精准参数建议\n### 五、预期效果评估"
+            user_prompt = T(
+                "ai_user_prompt_img", csv=csv_str, inputs=in_str, targets=target_str,
             )
         else:
-            user_prompt = (
-                f"## 实验数据\n```csv\n{csv_str}\n```\n\n"
-                f"## 数据列说明\n- 实验参数列 (可调变量): {in_str}\n\n"
-                f"## 用户的量化目标\n{target_str}\n\n---\n\n"
-                f"请按以下结构分析:\n\n"
-                f"### 一、目标差距诊断\n### 二、瓶颈机理分析\n"
-                f"### 三、精准参数建议\n### 四、预期效果评估"
+            user_prompt = T(
+                "ai_user_prompt_no_img", csv=csv_str, inputs=in_str, targets=target_str,
             )
 
         model = genai.GenerativeModel(
@@ -620,7 +543,7 @@ def analyze_with_ai(
             response = model.generate_content(user_prompt)
 
         full = response.text
-        split_mk = "### 四" if has_image else "### 三"
+        split_mk = T("ai_split_marker_img") if has_image else T("ai_split_marker_no_img")
         if split_mk in full:
             parts = full.split(split_mk, 1)
             analysis = parts[0].strip()
@@ -636,11 +559,8 @@ def analyze_with_ai(
         return {"success": False, "error": str(e)}
 
 
-# ============================================================
-# Portal Header (Logo + Badge + Popover)
-# ============================================================
+# --- Portal Header (Logo + Badge + Popover) ---
 def render_header():
-    """简洁的门户顶栏：左侧 Logo / 右侧登录 Popover。"""
     role = st.session_state.get("user_role", "guest")
     is_admin = role == "admin"
     badge_cls = "badge-admin" if is_admin else "badge-guest"
@@ -648,111 +568,97 @@ def render_header():
 
     st.markdown(
         f'<div class="portal-header">'
-        f'  <span class="logo"><span class="accent">NEXUS</span> Lab</span>'
+        f'  <span class="logo"><span class="accent">JPZ</span>{T("logo_suffix")}</span>'
         f'  <span class="badge {badge_cls}">{badge_txt}</span>'
         f'</div>',
         unsafe_allow_html=True,
     )
 
-    # 两列布局: 左侧留白 | 右侧 popover
-    _, pop_col = st.columns([8, 2])
+    _, lang_col, pop_col = st.columns([7, 1, 2])
+    with lang_col:
+        lang_options = ["English", "中文"]
+        current_lang = st.session_state.get("language", "en")
+        current_idx = 0 if current_lang == "en" else 1
+        selected = st.selectbox(
+            T("lang_label"),
+            options=lang_options,
+            index=current_idx,
+            key="lang_selector",
+            label_visibility="collapsed",
+        )
+        new_lang = "en" if selected == "English" else "cn"
+        if new_lang != current_lang:
+            st.session_state["language"] = new_lang
+            st.rerun()
     with pop_col:
-        popover_label = "Admin" if is_admin else "未登录"
+        popover_label = T("popover_admin") if is_admin else T("popover_guest")
         with st.popover(popover_label, width="stretch"):
             if is_admin:
-                st.markdown("已登录为 **Admin**")
-                st.caption("已启用 Google Sheets 云端同步权限")
-                if st.button("退出登录", key="logout_btn", width="stretch"):
+                st.markdown(T("logged_in_as_admin"))
+                st.caption(T("cloud_sync_enabled"))
+                if st.button(T("logout"), key="logout_btn", width="stretch"):
                     st.session_state["user_role"] = "guest"
                     st.rerun()
             else:
-                st.markdown("**管理员登录**")
-                st.caption("解锁 Google Sheets 云端读取 / 保存功能")
+                st.markdown(T("admin_login"))
+                st.caption(T("unlock_gsheets"))
                 pwd = st.text_input(
-                    "密码", type="password", key="login_pwd",
-                    placeholder="输入管理密码",
+                    T("password"), type="password", key="login_pwd",
+                    placeholder=T("password_placeholder"),
                 )
-                if st.button("登录", key="login_btn", width="stretch"):
+                if st.button(T("login"), key="login_btn", width="stretch"):
                     try:
                         correct = st.secrets["general"]["password"]
                         if pwd == correct:
                             st.session_state["user_role"] = "admin"
                             st.rerun()
                         else:
-                            st.error("密码错误")
+                            st.error(T("wrong_password"))
                     except Exception:
-                        st.warning(
-                            "未配置管理密码。请在 `.streamlit/secrets.toml` 中添加:\n\n"
-                            '```toml\n[general]\npassword = "your_password"\n```'
-                        )
+                        st.warning(T("no_password_config"))
 
 
-# ============================================================
-# Stats Bar (功能概览)
-# ============================================================
 def render_stats_bar():
-    """显示数据库关键指标的水平统计栏。"""
     df = st.session_state["df"]
     rows, cols = df.shape
     sync_time = st.session_state.get("last_sync_time")
-    sync_display = sync_time if sync_time else "尚未同步"
-    role_display = "管理员" if st.session_state.get("user_role") == "admin" else "访客"
-    db_status = "实时保存中" if st.session_state.get("db_ready") else "未连接"
+    sync_display = sync_time if sync_time else "--"
+    role_display = T("role_admin") if st.session_state.get("user_role") == "admin" else T("role_guest")
+    db_status = T("storage_active") if st.session_state.get("db_ready") else T("storage_disconnected")
 
     st.markdown(
         f'<div class="stats-bar">'
-        f'  <div class="stat-item">'
-        f'    <div class="stat-label">实验总条目</div>'
-        f'    <div class="stat-value accent">{rows}</div>'
-        f'  </div>'
-        f'  <div class="stat-item">'
-        f'    <div class="stat-label">数据列数</div>'
-        f'    <div class="stat-value">{cols}</div>'
-        f'  </div>'
-        f'  <div class="stat-item">'
-        f'    <div class="stat-label">当前身份</div>'
-        f'    <div class="stat-value">{role_display}</div>'
-        f'  </div>'
-        f'  <div class="stat-item">'
-        f'    <div class="stat-label">本地存储</div>'
-        f'    <div class="stat-value">{db_status}</div>'
-        f'  </div>'
-        f'  <div class="stat-item">'
-        f'    <div class="stat-label">最近云端同步</div>'
-        f'    <div class="stat-value">{sync_display}</div>'
-        f'  </div>'
+        f'  <div class="stat-item"><div class="stat-label">{T("stat_records")}</div><div class="stat-value accent">{rows}</div></div>'
+        f'  <div class="stat-item"><div class="stat-label">{T("stat_columns")}</div><div class="stat-value">{cols}</div></div>'
+        f'  <div class="stat-item"><div class="stat-label">{T("stat_identity")}</div><div class="stat-value">{role_display}</div></div>'
+        f'  <div class="stat-item"><div class="stat-label">{T("stat_storage")}</div><div class="stat-value">{db_status}</div></div>'
+        f'  <div class="stat-item"><div class="stat-label">{T("stat_cloud_sync")}</div><div class="stat-value">{sync_display}</div></div>'
         f'</div>',
         unsafe_allow_html=True,
     )
 
 
-# ============================================================
-# Platform Guide Dialog (平台向导弹窗)
-# ============================================================
-@st.dialog("NEXUS 平台使用助手", width="large")
-def guide_dialog():
-    """平台使用向导弹窗：基于 Gemini 回答平台使用问题。"""
+# --- Platform Guide Dialog (平台向导弹窗) ---
+def _guide_dialog_body():
+    """Platform guide dialog body (language-aware)."""
 
-    if st.button("关闭", key="close_guide"):
+    if st.button(T("close"), key="close_guide"):
         st.session_state["show_guide_dialog"] = False
         st.rerun()
 
-    st.markdown(
-        "我是您的平台助手。您可以询问任何关于本平台使用方法的问题，"
-        "例如: 如何添加新列？如何同步数据？如何设置目标值？"
-    )
+    st.markdown(T("guide_intro"))
 
     # 显示历史对话
     chat_area = st.container(height=350)
     with chat_area:
         if not st.session_state["guide_chat_history"]:
-            st.caption("暂无对话。在下方输入您的问题。")
+            st.caption(T("guide_no_history"))
         for msg in st.session_state["guide_chat_history"]:
             with st.chat_message(msg["role"]):
                 st.markdown(msg["content"])
 
     user_input = st.chat_input(
-        "输入问题，例如: 如何使用公式计算列？",
+        T("guide_input_placeholder"),
         key="guide_chat_input",
     )
 
@@ -762,25 +668,9 @@ def guide_dialog():
             {"role": "user", "content": user_input}
         )
         if not api_key:
-            answer = (
-                "请先在「系统设置」页面配置 Gemini API Key，"
-                "之后即可使用 AI 助手功能。"
-            )
+            answer = T("guide_no_api_key")
         else:
-            system_prompt = (
-                "你是一个实验数据管理平台 (NEXUS Lab) 的使用助手。\n"
-                "平台功能:\n"
-                "- 首页: 功能卡片入口，快速导航到各模块\n"
-                "- 数据工作台: 管理列结构(添加/重命名/删除/公式列)、"
-                "语义映射(设定 Inputs/Outputs)、目标值设定、数据编辑器、"
-                "云端同步(Pull/Push, 仅管理员)、CSV 导入导出\n"
-                "- AI 诊断: Gemini 驱动的深度分析，支持自定义分析要求、"
-                "图像分析、实验数据追问\n"
-                "- 图表可视化: 散点图(支持趋势线)、相关性热力图\n"
-                "- 系统设置: 项目信息、Gemini API Key 配置\n"
-                "- 报告导出: 首页直接下载 HTML 实验报告\n\n"
-                "请用简短、清晰的中文回答用户关于平台使用方法的问题。"
-            )
+            system_prompt = T("guide_system_prompt")
             try:
                 genai.configure(api_key=api_key)
                 model = genai.GenerativeModel(
@@ -789,7 +679,7 @@ def guide_dialog():
                 response = model.generate_content(user_input)
                 answer = response.text
             except Exception as e:
-                answer = f"AI 回答失败: {str(e)}"
+                answer = T("guide_ai_error", error=str(e))
 
         st.session_state["guide_chat_history"].append(
             {"role": "assistant", "content": answer}
@@ -797,114 +687,129 @@ def guide_dialog():
         st.rerun()
 
 
-# ============================================================
-# Portal Home — 功能中心 (6 Tiles + Recent Data)
-# ============================================================
+@st.dialog("JPZ Platform Assistant", width="large")
+def guide_dialog_en():
+    _guide_dialog_body()
+
+
+@st.dialog("JPZ 平台使用助手", width="large")
+def guide_dialog_cn():
+    _guide_dialog_body()
+
+
+def guide_dialog():
+    """Dispatch to the correct language dialog."""
+    if st.session_state.get("language", "en") == "cn":
+        guide_dialog_cn()
+    else:
+        guide_dialog_en()
+
+
 def render_portal_home():
-    """门户首页：功能磁贴卡片 + 最近数据摘要。"""
     is_admin = st.session_state.get("user_role") == "admin"
+    df = st.session_state["df"]
+    rows, cols = df.shape if df is not None and not df.empty else (0, 0)
+    num_cols_count = len(df.select_dtypes(include=["number"]).columns) if df is not None else 0
+    sync_time = st.session_state.get("last_sync_time", "--")
 
     st.markdown(
-        '<p style="font-size:0.85rem;color:#888;margin-bottom:0.6rem;">功能中心</p>',
+        f'<p style="font-size:1.5rem;font-weight:800;color:#1D1D1F;margin-bottom:0.1rem;">'
+        f'{T("welcome_title")}</p>'
+        f'<p style="font-size:0.85rem;color:#86868B;margin-bottom:1.8rem;">'
+        f'{T("welcome_subtitle")}</p>',
         unsafe_allow_html=True,
     )
 
-    # --- Row 1: 三张卡片 ---
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        if st.button(
-            ":material/table_chart:  数据工作台",
-            key="tile_studio", width="stretch",
-        ):
-            st.session_state["active_view"] = "data_studio"
-            st.rerun()
-        st.caption("管理列结构、编辑数据、语义映射")
+    m1, m2, m3, m4 = st.columns(4)
+    with m1:
+        st.markdown(
+            f'<div style="background:#FFF;border:1px solid #E5E5E5;border-radius:14px;padding:1.2rem 1.4rem;">'
+            f'<div style="font-size:2rem;font-weight:800;color:#0047AB;">{rows}</div>'
+            f'<div style="font-size:0.7rem;color:#86868B;margin-top:0.2rem;">{T("metric_records")}</div></div>',
+            unsafe_allow_html=True,
+        )
+    with m2:
+        st.markdown(
+            f'<div style="background:#FFF;border:1px solid #E5E5E5;border-radius:14px;padding:1.2rem 1.4rem;">'
+            f'<div style="font-size:2rem;font-weight:800;color:#0047AB;">{cols}</div>'
+            f'<div style="font-size:0.7rem;color:#86868B;margin-top:0.2rem;">{T("metric_columns")}</div></div>',
+            unsafe_allow_html=True,
+        )
+    with m3:
+        st.markdown(
+            f'<div style="background:#FFF;border:1px solid #E5E5E5;border-radius:14px;padding:1.2rem 1.4rem;">'
+            f'<div style="font-size:2rem;font-weight:800;color:#0047AB;">{num_cols_count}</div>'
+            f'<div style="font-size:0.7rem;color:#86868B;margin-top:0.2rem;">{T("metric_numeric")}</div></div>',
+            unsafe_allow_html=True,
+        )
+    with m4:
+        st.markdown(
+            f'<div style="background:#FFF;border:1px solid #E5E5E5;border-radius:14px;padding:1.2rem 1.4rem;">'
+            f'<div style="font-size:1.1rem;font-weight:700;color:#1D1D1F;margin-top:0.4rem;">{sync_time}</div>'
+            f'<div style="font-size:0.7rem;color:#86868B;margin-top:0.2rem;">{T("metric_last_sync")}</div></div>',
+            unsafe_allow_html=True,
+        )
 
-    with c2:
-        if st.button(
-            ":material/smart_toy:  平台向导",
-            key="tile_guide", width="stretch",
-        ):
+    st.markdown('<div style="height:1.5rem;"></div>', unsafe_allow_html=True)
+
+    qa, qb = st.columns(2)
+    with qa:
+        if st.button(T("btn_guide"), key="tile_guide", width="stretch"):
             st.session_state["show_guide_dialog"] = True
             st.rerun()
-        st.caption("平台使用方法、功能说明")
-
-    # 弹窗渲染 (放在按钮逻辑之外, 基于 session_state 触发)
-    if st.session_state.get("show_guide_dialog", False):
-        guide_dialog()
-
-    with c3:
-        if st.button(
-            ":material/psychology:  AI 诊断",
-            key="tile_ai", width="stretch",
-        ):
-            st.session_state["active_view"] = "dashboard"
-            st.rerun()
-        st.caption("Gemini 驱动的智能实验分析")
-
-    # --- Row 2: 三张卡片 ---
-    c4, c5, c6 = st.columns(3)
-    with c4:
-        if st.button(
-            ":material/leaderboard:  图表可视化",
-            key="tile_visual", width="stretch",
-        ):
-            st.session_state["active_view"] = "visual"
-            st.rerun()
-        st.caption("散点趋势图、相关性热力图")
-
-    with c5:
+    with qb:
         report_html = generate_html_report()
         html_filename = f"Lab_Report_{datetime.now().strftime('%Y%m%d')}.html"
         st.download_button(
-            ":material/description:  报告导出",
+            T("btn_export_report"),
             data=report_html.encode("utf-8"),
-            file_name=html_filename,
-            mime="text/html",
+            file_name=html_filename, mime="text/html",
             key="tile_report", width="stretch",
         )
-        st.caption("点击即下载 HTML 实验报告")
 
-    with c6:
-        if st.button(
-            ":material/settings:  系统设置",
-            key="tile_settings", width="stretch",
-        ):
+    if st.session_state.get("show_guide_dialog", False):
+        guide_dialog()
+
+    st.markdown('<div style="height:1rem;"></div>', unsafe_allow_html=True)
+
+    c1, c2, c3, c4 = st.columns(4)
+    with c1:
+        if st.button(T("btn_data_studio"), key="tile_studio", width="stretch"):
+            st.session_state["active_view"] = "data_studio"
+            st.rerun()
+    with c2:
+        if st.button(T("btn_ai_diagnosis"), key="tile_ai", width="stretch"):
+            st.session_state["active_view"] = "dashboard"
+            st.rerun()
+    with c3:
+        if st.button(T("btn_visual"), key="tile_visual", width="stretch"):
+            st.session_state["active_view"] = "visual"
+            st.rerun()
+    with c4:
+        if st.button(T("btn_settings"), key="tile_settings", width="stretch"):
             st.session_state["active_view"] = "settings"
             st.rerun()
-        st.caption("项目信息、Gemini API 配置")
 
-    # --- 最近数据摘要 ---
     st.markdown('<hr class="section-divider">', unsafe_allow_html=True)
-    st.markdown(
-        '<div class="recent-section">'
-        '  <div class="recent-title">最近数据 (Recent Entries)</div>'
-        '</div>',
-        unsafe_allow_html=True,
-    )
-    df = st.session_state["df"]
+    st.markdown(f'<div class="recent-title">{T("recent_data")}</div>', unsafe_allow_html=True)
     if df is not None and not df.empty:
         st.dataframe(df.tail(5), width="stretch", hide_index=True)
     else:
-        st.info("暂无数据。请进入数据工作台添加实验记录。")
+        st.info(T("no_data_hint"))
 
 
-# ============================================================
-# Settings Page — 系统设置
-# ============================================================
 def render_settings():
-    """项目信息和 API Key 配置。"""
-    if st.button(":material/arrow_back: 返回首页", key="back_settings"):
+    if st.button(T("back_home"), key="back_settings"):
         st.session_state["active_view"] = "home"
         st.rerun()
 
-    st.markdown('<span class="area-title">系统设置</span>', unsafe_allow_html=True)
+    st.markdown(f'<span class="area-title">{T("settings_title")}</span>', unsafe_allow_html=True)
 
-    st.subheader("项目信息")
+    st.subheader(T("project_info"))
     col_a, col_b = st.columns(2)
     with col_a:
         mat = st.text_input(
-            "研究材料名称",
+            T("material_name_label"),
             value=st.session_state.get("material_name", ""),
             key="settings_mat",
         )
@@ -912,7 +817,7 @@ def render_settings():
             st.session_state["material_name"] = mat
     with col_b:
         eq = st.text_input(
-            "设备 / 工艺名称",
+            T("equipment_name_label"),
             value=st.session_state.get("equipment_name", ""),
             key="settings_eq",
         )
@@ -920,51 +825,50 @@ def render_settings():
             st.session_state["equipment_name"] = eq
 
     st.divider()
-    st.subheader("Gemini API Key")
+    st.subheader(T("gemini_api_key"))
     api = st.text_input(
-        "API Key",
+        T("api_key_label"),
         value=st.session_state.get("api_key", ""),
         type="password",
         key="settings_api",
     )
     if api != st.session_state.get("api_key"):
         st.session_state["api_key"] = api
-    st.caption("API Key 仅保留在当前会话内存中，关闭页面后自动清除。")
+    st.caption(T("api_key_hint"))
 
 
-# ============================================================
-# Visual Analytics (独立页面)
-# ============================================================
+# --- Visual Analytics (独立页面) ---
 def render_visual_page():
     """图表可视化独立页面。"""
-    if st.button(":material/arrow_back: 返回首页", key="back_visual"):
+    if st.button(T("back_home"), key="back_visual"):
         st.session_state["active_view"] = "home"
         st.rerun()
 
-    st.markdown('<span class="area-title">图表可视化</span>', unsafe_allow_html=True)
+    st.markdown(f'<span class="area-title">{T("visual_title")}</span>', unsafe_allow_html=True)
 
     df = st.session_state["df"]
     numeric_cols = df.select_dtypes(include="number").columns.tolist()
     all_cols = df.columns.tolist()
 
     if len(numeric_cols) < 1:
-        st.info("至少需要 1 个数值列才能绘制图表。")
+        st.info(T("need_numeric_col"))
         return
 
+    _none = T("none_option")
     c1, c2, c3 = st.columns(3)
     with c1:
-        x_col = st.selectbox("X 轴 (支持文本列)", options=all_cols, index=0, key="vis_x")
+        x_col = st.selectbox(T("x_axis"), options=all_cols, index=0, key="vis_x")
     with c2:
         y_col = st.selectbox(
-            "Y 轴 (仅数值列)", options=numeric_cols,
+            T("y_axis"), options=numeric_cols,
             index=min(len(numeric_cols) - 1, 0), key="vis_y",
         )
     with c3:
         color_col = st.selectbox(
-            "颜色映射 (可选)", options=["(无)"] + all_cols, index=0, key="vis_color",
+            T("color_map"), options=[_none] + all_cols, index=0, key="vis_color",
         )
 
-    color = color_col if color_col != "(无)" else None
+    color = color_col if color_col != _none else None
     try:
         fig_sc = px.scatter(
             df, x=x_col, y=y_col, color=color, trendline="ols",
@@ -973,49 +877,46 @@ def render_visual_page():
         )
         fig_sc.update_layout(
             margin=dict(l=40, r=20, t=30, b=40),
-            plot_bgcolor="#FFFFFF", paper_bgcolor="#F8F9FA",
+            plot_bgcolor="#FFFFFF", paper_bgcolor="#FFFFFF",
         )
         st.plotly_chart(fig_sc, width="stretch")
     except Exception:
         fig_sc = px.scatter(df, x=x_col, y=y_col, color=color, template="simple_white")
         fig_sc.update_layout(
             margin=dict(l=40, r=20, t=30, b=40),
-            plot_bgcolor="#FFFFFF", paper_bgcolor="#F8F9FA",
+            plot_bgcolor="#FFFFFF", paper_bgcolor="#FFFFFF",
         )
         st.plotly_chart(fig_sc, width="stretch")
 
-    st.markdown("**相关性热力图**")
+    st.markdown(f"**{T('correlation_heatmap')}**")
     corr = df[numeric_cols].corr()
     fig_hm = go.Figure(data=go.Heatmap(
         z=corr.values, x=corr.columns.tolist(), y=corr.index.tolist(),
-        colorscale="Blues", zmin=-1, zmax=1,
+        colorscale=[[0.0, "#F0F4FF"], [0.5, "#6B9FD6"], [1.0, "#0047AB"]],
+        zmin=-1, zmax=1,
         text=corr.values.round(2), texttemplate="%{text}",
     ))
     fig_hm.update_layout(
         margin=dict(l=60, r=20, t=30, b=60), height=420,
-        plot_bgcolor="#FFFFFF", paper_bgcolor="#F8F9FA",
+        plot_bgcolor="#FFFFFF", paper_bgcolor="#FFFFFF",
     )
     st.plotly_chart(fig_hm, width="stretch")
 
 
-# ============================================================
-# Tab: 数据工作台 (Data Studio)
-# ============================================================
+# --- Tab: 数据工作台 (Data Studio) ---
 def render_data_studio():
-    if st.button(":material/arrow_back: 返回首页", key="back_studio"):
+    if st.button(T("back_home"), key="back_studio"):
         st.session_state["active_view"] = "home"
         st.rerun()
 
-    st.markdown('<span class="area-title">数据工作台</span>', unsafe_allow_html=True)
+    st.markdown(f'<span class="area-title">{T("data_studio_title")}</span>', unsafe_allow_html=True)
 
     df = st.session_state["df"]
 
-    # =================================================================
-    # 第一层: 数据存取区 (IO Zone) — 云端 + 本地统一置顶
-    # =================================================================
+    # --- 第一层: 数据存取区 (IO Zone) — 云端 + 本地统一置顶 ---
     with st.container(border=True):
         st.markdown(
-            '<div class="area-title"><span class="area-number">01</span> 数据存取</div>',
+            f'<div class="area-title"><span class="area-number">{T("io_zone_title")}</span>{T("io_zone_label")}</div>',
             unsafe_allow_html=True,
         )
 
@@ -1024,7 +925,7 @@ def render_data_studio():
             sc1, sc2 = st.columns(2)
             with sc1:
                 if st.button(
-                    "从云端拉取 (Pull)",
+                    T("pull_from_cloud"),
                     width="stretch", key="gs_pull",
                 ):
                     try:
@@ -1038,7 +939,7 @@ def render_data_studio():
                             else:
                                 df_cloud[col] = df_cloud[col].fillna("")
                         if df_cloud.empty or len(df_cloud.columns) == 0:
-                            st.warning("云端工作表为空, 未执行覆盖。")
+                            st.warning(T("cloud_empty_warning"))
                         else:
                             st.session_state["df"] = df_cloud
                             st.session_state["input_columns"] = []
@@ -1049,16 +950,15 @@ def render_data_studio():
                             _clear_editor_widget()
                             st.session_state["last_sync_time"] = datetime.now().strftime("%Y-%m-%d %H:%M")
                             st.success(
-                                f"已从云端拉取并覆盖本地 "
-                                f"({len(df_cloud)} 行 x {len(df_cloud.columns)} 列)"
+                                T("pull_success", rows=len(df_cloud), cols=len(df_cloud.columns))
                             )
                             st.rerun()
                     except Exception as e:
-                        st.error(f"云端拉取失败: {str(e)}")
+                        st.error(T("pull_failed", error=str(e)))
 
             with sc2:
                 if st.button(
-                    "同步到云端 (Push)",
+                    T("push_to_cloud"),
                     width="stretch", key="gs_push", type="primary",
                 ):
                     try:
@@ -1067,19 +967,13 @@ def render_data_studio():
                         conn = st.connection("gsheets", type=GSheetsConnection)
                         conn.update(data=current_df.fillna(""))
                         st.session_state["last_sync_time"] = datetime.now().strftime("%Y-%m-%d %H:%M")
-                        st.toast("云端同步已完成")
+                        st.toast(T("push_toast"))
                     except Exception as e:
-                        st.error(f"云端同步失败: {str(e)}")
-                        st.markdown(
-                            "**排查建议**: 请检查 Google Sheet 是否已"
-                            "分享给 Service Account 邮箱, 并赋予 **Editor** 权限。"
-                        )
-            st.caption(
-                "Pull = 云端覆盖本地 | Push = 本地覆盖云端 | "
-                "日常编辑自动保存至本地数据库。"
-            )
+                        st.error(T("push_failed", error=str(e)))
+                        st.markdown(T("push_troubleshoot"))
+            st.caption(T("cloud_caption"))
             st.markdown(
-                '<hr style="border:none; border-top:1px solid #E8E8E8; margin:0.5rem 0;">',
+                '<hr style="border:none; border-top:1px solid #E5E5E5; margin:0.5rem 0;">',
                 unsafe_allow_html=True,
             )
 
@@ -1088,21 +982,20 @@ def render_data_studio():
         with lc1:
             csv_bytes = df.to_csv(index=False).encode("utf-8")
             st.download_button(
-                "下载 CSV 备份", csv_bytes, "nexus_backup.csv",
+                T("download_csv"), csv_bytes, "jpz_backup.csv",
                 "text/csv", width="stretch",
             )
         with lc2:
             uploaded = st.file_uploader(
-                "上传 CSV 恢复", type=["csv"], key="csv_uploader",
+                T("upload_csv"), type=["csv"], key="csv_uploader",
             )
             if uploaded is not None:
                 try:
                     preview_df = pd.read_csv(uploaded)
                     st.info(
-                        f"检测到 {len(preview_df)} 行 x "
-                        f"{len(preview_df.columns)} 列"
+                        T("detected_rows_cols", rows=len(preview_df), cols=len(preview_df.columns))
                     )
-                    if st.button("确认导入", key="confirm_csv_import"):
+                    if st.button(T("confirm_import"), key="confirm_csv_import"):
                         st.session_state["df"] = preview_df
                         st.session_state["input_columns"] = []
                         st.session_state["output_columns"] = []
@@ -1112,16 +1005,13 @@ def render_data_studio():
                         _clear_editor_widget()
                         st.rerun()
                 except Exception as e:
-                    st.error(f"CSV 解析失败: {e}")
+                    st.error(T("csv_parse_failed", error=str(e)))
 
-    # =================================================================
-    # 第二层: 表格结构与定义 (Schema & Definition)
-    # 左侧 = Popover 列管理 | 右侧 = 语义映射 + 目标设定
-    # =================================================================
+    # --- 第二层: 表格结构与定义 (Schema & Definition) ---
     st.markdown(
-        '<div class="area-title">'
-        '<span class="area-number">02</span> 结构定义与语义映射'
-        '</div>',
+        f'<div class="area-title">'
+        f'<span class="area-number">{T("schema_zone_title")}</span>{T("schema_zone_label")}'
+        f'</div>',
         unsafe_allow_html=True,
     )
 
@@ -1131,20 +1021,21 @@ def render_data_studio():
     with schema_left:
         cols_list = df.columns.tolist()
 
-        with st.popover(":material/build: 表格结构管理", help="添加、重命名、删除、排序列，或用公式生成新列"):
-            pop_tabs = st.tabs(["新增", "重命名", "删除", "公式列", "排序"])
+        with st.popover(T("table_structure_btn"), help=T("table_structure_help")):
+            pop_tabs = st.tabs([T("tab_add"), T("tab_rename"), T("tab_delete"), T("tab_formula"), T("tab_reorder")])
 
             with pop_tabs[0]:
-                ncn = st.text_input("新列名", key="new_col_name", placeholder="输入列名")
+                ncn = st.text_input(T("new_col_name"), key="new_col_name", placeholder=T("new_col_name_placeholder"))
+                _dtype_opts = [T("dtype_number"), T("dtype_text")]
                 col_dtype = st.radio(
-                    "数据类型", ["数值 (Number)", "文本 (Text)"],
+                    T("data_type"), _dtype_opts,
                     index=0, key="new_col_dtype", horizontal=True,
                 )
-                if st.button("立即创建", key="add_col_btn", type="primary", width="stretch"):
+                if st.button(T("create_now"), key="add_col_btn", type="primary", width="stretch"):
                     name = (ncn or "").strip()
                     if name and name not in df.columns:
                         new = df.copy()
-                        if col_dtype.startswith("文本"):
+                        if col_dtype == _dtype_opts[1]:  # Text
                             new[name] = ""
                         else:
                             new[name] = 0.0
@@ -1155,14 +1046,14 @@ def render_data_studio():
                         _clear_editor_widget()
                         st.rerun()
                     elif not name:
-                        st.warning("请输入列名。")
+                        st.warning(T("enter_col_name"))
                     else:
-                        st.warning("该列名已存在。")
+                        st.warning(T("col_exists"))
 
             with pop_tabs[1]:
-                old_name = st.selectbox("选择列", cols_list, key="rename_select")
-                new_name_input = st.text_input("新名称", key="rename_input", placeholder="输入新名称")
-                if st.button("确认修改", key="rename_btn", width="stretch"):
+                old_name = st.selectbox(T("select_column"), cols_list, key="rename_select")
+                new_name_input = st.text_input(T("new_name"), key="rename_input", placeholder=T("new_name_placeholder"))
+                if st.button(T("confirm_rename"), key="rename_btn", width="stretch"):
                     nn = (new_name_input or "").strip()
                     if nn and nn != old_name:
                         st.session_state["df"] = df.rename(columns={old_name: nn})
@@ -1183,13 +1074,13 @@ def render_data_studio():
                         _clear_editor_widget()
                         st.rerun()
                     elif nn == old_name:
-                        st.warning("新旧列名相同。")
+                        st.warning(T("same_name_warning"))
                     else:
-                        st.warning("请输入有效的新列名。")
+                        st.warning(T("enter_valid_name"))
 
             with pop_tabs[2]:
-                del_cols = st.multiselect("选择要删除的列", cols_list, key="del_cols_select")
-                if st.button("确认删除", key="del_cols_btn", type="primary", width="stretch"):
+                del_cols = st.multiselect(T("select_cols_delete"), cols_list, key="del_cols_select")
+                if st.button(T("confirm_delete"), key="del_cols_btn", type="primary", width="stretch"):
                     if del_cols:
                         st.session_state["df"] = df.drop(columns=del_cols, errors="ignore")
                         st.session_state["input_columns"] = [
@@ -1208,24 +1099,24 @@ def render_data_studio():
                         _clear_editor_widget()
                         st.rerun()
                     else:
-                        st.warning("请先选择要删除的列。")
+                        st.warning(T("select_cols_first"))
 
             with pop_tabs[3]:
-                formula_col_name = st.text_input("新列名", key="formula_col_name", placeholder="例如: 密度")
+                formula_col_name = st.text_input(T("formula_col_name"), key="formula_col_name", placeholder=T("formula_expr_placeholder"))
                 formula_expr = st.text_input(
-                    "计算公式", key="formula_expr",
-                    placeholder="例如: `生长速率(um/h)` / `微管密度(cm-2)`",
+                    T("formula_expr"), key="formula_expr",
+                    placeholder=T("formula_expr_placeholder"),
                 )
-                st.caption("用反引号 ` 包裹列名, 支持 +, -, *, / 及括号运算。")
-                if st.button("计算并添加", key="calc_col_btn", type="primary", width="stretch"):
+                st.caption(T("formula_help"))
+                if st.button(T("calc_and_add"), key="calc_col_btn", type="primary", width="stretch"):
                     f_name = (formula_col_name or "").strip()
                     f_expr = (formula_expr or "").strip()
                     if not f_name:
-                        st.error("请输入新列名。")
+                        st.error(T("enter_formula_col_name"))
                     elif not f_expr:
-                        st.error("请输入计算公式。")
+                        st.error(T("enter_formula_expr"))
                     elif f_name in df.columns:
-                        st.error(f"列 \"{f_name}\" 已存在。")
+                        st.error(T("col_already_exists", name=f_name))
                     else:
                         try:
                             result = df.eval(f_expr)
@@ -1255,11 +1146,7 @@ def render_data_studio():
                                 st.rerun()
                             except Exception:
                                 st.error(
-                                    f"公式计算失败: {e1}\n\n"
-                                    f"**正确格式示例:**\n"
-                                    f"- `` `列A` + `列B` ``\n"
-                                    f"- `` `列A` / `列B` * 100 ``\n\n"
-                                    f"当前可用列名: {', '.join(df.columns.tolist())}"
+                                    T("formula_failed", error=str(e1), cols=", ".join(df.columns.tolist()))
                                 )
 
             with pop_tabs[4]:
@@ -1267,7 +1154,7 @@ def render_data_studio():
                 current_order = st.session_state["custom_column_order"]
 
                 if SORTABLES_AVAILABLE:
-                    st.caption("上下拖拽调整列的显示顺序")
+                    st.caption(T("drag_sort_caption"))
                     sorted_cols = sort_items(current_order, direction="vertical")
                     if sorted_cols != current_order:
                         st.session_state["custom_column_order"] = sorted_cols
@@ -1276,17 +1163,17 @@ def render_data_studio():
                         _clear_editor_widget()
                         st.rerun()
                 else:
-                    st.caption("拖拽排序需要安装 streamlit-sortables")
+                    st.caption(T("need_sortables"))
                     st.code("pip install streamlit-sortables", language="bash")
-                    st.caption("安装后重启应用即可使用拖拽排序。以下为备用方案:")
+                    st.caption(T("install_sortables_hint"))
                     new_order = st.multiselect(
-                        "列顺序 (拖拽标签调整)",
+                        T("col_order_label"),
                         options=current_order,
                         default=current_order,
                         key="reorder_cols",
                         label_visibility="collapsed",
                     )
-                    if st.button("应用排序", key="apply_order_btn", type="primary", width="stretch"):
+                    if st.button(T("apply_order"), key="apply_order_btn", type="primary", width="stretch"):
                         if set(new_order) == set(current_order) and len(new_order) == len(current_order):
                             st.session_state["custom_column_order"] = new_order
                             st.session_state["df"] = st.session_state["df"][new_order]
@@ -1295,39 +1182,38 @@ def render_data_studio():
                             st.rerun()
                         else:
                             st.warning(
-                                f"请保留全部 {len(current_order)} 列，只调整顺序。"
+                                T("keep_all_cols_warning", n=len(current_order))
                             )
 
         # 样品图片 (可选)
-        with st.expander("样品图片 (可选)"):
-            st.caption("上传 SEM / 光学显微镜图片，AI 将结合图像形貌分析")
+        with st.expander(T("sample_image_expander")):
+            st.caption(T("sample_image_caption"))
             up_img = st.file_uploader(
-                "上传图片", type=["png", "jpg", "jpeg"],
+                T("upload_image"), type=["png", "jpg", "jpeg"],
                 key="img_uploader", label_visibility="collapsed",
             )
             if up_img is not None:
                 img = Image.open(up_img)
-                st.image(img, caption=f"已上传: {up_img.name}", width="stretch")
+                st.image(img, caption=T("uploaded_prefix", name=up_img.name), width="stretch")
                 st.session_state["sample_image"] = up_img.getvalue()
                 st.session_state["sample_image_name"] = up_img.name
             elif st.session_state.get("sample_image"):
                 img = Image.open(io.BytesIO(st.session_state["sample_image"]))
                 st.image(
                     img,
-                    caption=f"已保存: {st.session_state.get('sample_image_name', '')}",
+                    caption=T("saved_prefix", name=st.session_state.get('sample_image_name', '')),
                     width="stretch",
                 )
-                if st.button("移除图片", key="rm_img_btn"):
+                if st.button(T("remove_image"), key="rm_img_btn"):
                     st.session_state["sample_image"] = None
                     st.session_state["sample_image_name"] = None
                     st.rerun()
 
     # ---- 右侧: 语义映射与目标设定 ----
     with schema_right:
-        st.markdown("""
+        st.markdown(f"""
         <div class="mapping-info">
-            <strong>第一步:</strong> 选择参数列 (Inputs) 和结果列 (Outputs)。
-            <strong>第二步:</strong> 为结果列设定量化目标值。
+            {T("mapping_info_html")}
         </div>
         """, unsafe_allow_html=True)
 
@@ -1335,17 +1221,17 @@ def render_data_studio():
         mc1, mc2 = st.columns(2)
         with mc1:
             inp = st.multiselect(
-                "Inputs (参数列) — 蓝色标记", all_cols,
+                T("inputs_label"), all_cols,
                 default=[c for c in st.session_state["input_columns"] if c in all_cols],
-                help="实验中可以控制的变量",
+                help=T("inputs_help"),
                 key="sel_inputs",
             )
         with mc2:
             avail_out = [c for c in all_cols if c not in inp]
             out = st.multiselect(
-                "Outputs (结果列) — 橙色标记", avail_out,
+                T("outputs_label"), avail_out,
                 default=[c for c in st.session_state["output_columns"] if c in avail_out],
-                help="想要优化的目标指标",
+                help=T("outputs_help"),
                 key="sel_outputs",
             )
 
@@ -1370,9 +1256,9 @@ def render_data_studio():
         tvs = dict(st.session_state.get("target_values", {}))
         if out:
             st.markdown(
-                '<div class="target-section">'
-                '<div class="target-section-title">设定各指标的目标值</div>'
-                '</div>',
+                f'<div class="target-section">'
+                f'<div class="target-section-title">{T("target_section_title")}</div>'
+                f'</div>',
                 unsafe_allow_html=True,
             )
             per_row = min(len(out), 3)
@@ -1392,23 +1278,21 @@ def render_data_studio():
                         # 优先从 memory 恢复, 其次从 tvs
                         remembered = memory.get(cn, tvs.get(cn, ""))
                         val = st.text_input(
-                            f"[{cn}] 目标值",
+                            T("target_input_label", col=cn),
                             value=str(remembered) if remembered else "",
-                            placeholder=f"均值 {avg:.2f}",
-                            help=f"当前均值: {avg:.2f}, 最优: {mx:.2f}",
+                            placeholder=T("target_placeholder", avg=avg),
+                            help=T("target_help", avg=avg, mx=mx),
                             key=f"tgt_{cn}",
                         )
                         tvs[cn] = val
                         # 写入持久记忆 (无论是否在当前 Outputs 中)
                         memory[cn] = val
-                        st.caption(f"均值 {avg:.2f} / 最优 {mx:.2f}")
+                        st.caption(T("target_caption", avg=avg, mx=mx))
 
         st.session_state["target_memory"] = memory
         st.session_state["target_values"] = {k: v for k, v in tvs.items() if k in out}
 
-    # =================================================================
-    # 配置状态栏 (Active Configuration)
-    # =================================================================
+    # --- 配置状态栏 (Active Configuration) ---
     _inp = st.session_state.get("input_columns", [])
     _out = st.session_state.get("output_columns", [])
     _tvs = st.session_state.get("target_values", {})
@@ -1435,18 +1319,15 @@ def render_data_studio():
         )
     else:
         st.markdown(
-            '<div class="hint-box" style="color:#999;">配置状态: 等待配置... '
-            '(请在上方设定参数列、结果列及目标值)</div>',
+            f'<div class="hint-box" style="color:#86868B;">{T("config_waiting")}</div>',
             unsafe_allow_html=True,
         )
 
-    # =================================================================
-    # 第三层: 数据表格 (The Grid)
-    # =================================================================
+    # --- 第三层: 数据表格 (The Grid) ---
     st.markdown(
-        '<div class="area-title">'
-        '<span class="area-number">03</span> 数据表格'
-        '</div>',
+        f'<div class="area-title">'
+        f'<span class="area-number">{T("grid_zone_title")}</span>{T("grid_zone_label")}'
+        f'</div>',
         unsafe_allow_html=True,
     )
 
@@ -1454,15 +1335,14 @@ def render_data_studio():
     save_status = st.session_state.pop("_save_status", None)
     if save_status == "saved":
         status_area.markdown(
-            '<div class="hint-box"><strong>状态:</strong> 所有更改已保存。</div>',
+            f'<div class="hint-box"><strong>{T("status_label")}</strong> {T("save_status_saved")}</div>',
             unsafe_allow_html=True,
         )
     else:
         status_area.markdown(
-            '<div class="hint-box">'
-            '<strong>状态:</strong> 本地数据库已就绪 (实时保存中) — '
-            '编辑即保存, 刷新页面数据自动恢复。'
-            '</div>',
+            f'<div class="hint-box">'
+            f'<strong>{T("status_label")}</strong> {T("save_status_ready")}'
+            f'</div>',
             unsafe_allow_html=True,
         )
 
@@ -1495,9 +1375,7 @@ def render_data_studio():
     )
 
 
-# ============================================================
-# Visual Analytics Module
-# ============================================================
+# --- Visual Analytics Module ---
 def _render_visual_analytics(df: pd.DataFrame):
     """散点图 + 相关性热力图，放在 Dashboard 的表格下方、AI 报告上方。"""
     if df.empty or len(df.columns) < 2:
@@ -1510,32 +1388,33 @@ def _render_visual_analytics(df: pd.DataFrame):
 
     all_cols = df.columns.tolist()
 
-    with st.expander("可视化分析 (Visual Analytics)", expanded=True):
+    _none = T("none_option")
+    with st.expander(T("visual_analytics_expander"), expanded=True):
 
         # ---- 交互控件: X / Y / Color ----
         ctrl1, ctrl2, ctrl3 = st.columns(3)
         with ctrl1:
             x_col = st.selectbox(
-                "X 轴 (支持文本列)", all_cols,
+                T("x_axis"), all_cols,
                 index=0,
                 key="va_x",
             )
         with ctrl2:
             y_default = min(len(num_cols) - 1, 0)
             y_col = st.selectbox(
-                "Y 轴 (仅数值列)", num_cols,
+                T("y_axis"), num_cols,
                 index=y_default,
                 key="va_y",
             )
         with ctrl3:
-            color_options = ["(无)"] + all_cols
+            color_options = [_none] + all_cols
             color_sel = st.selectbox(
-                "颜色映射 (可选)", color_options,
+                T("color_map"), color_options,
                 index=0,
                 key="va_color",
             )
 
-        color_arg = color_sel if color_sel != "(无)" else None
+        color_arg = color_sel if color_sel != _none else None
 
         # ---- 散点图 + 趋势线 ----
         try:
@@ -1562,7 +1441,7 @@ def _render_visual_analytics(df: pd.DataFrame):
                 margin=dict(t=50, b=40, l=50, r=30),
                 xaxis=dict(gridcolor="#F0F0F0"),
                 yaxis=dict(gridcolor="#F0F0F0"),
-                font=dict(color="#333"),
+                font=dict(color="#1D1D1F"),
                 plot_bgcolor="#FFFFFF",
                 paper_bgcolor="#FFFFFF",
             )
@@ -1573,11 +1452,11 @@ def _render_visual_analytics(df: pd.DataFrame):
 
             st.plotly_chart(fig_scatter, width="stretch")
         except Exception as exc:
-            st.warning(f"散点图绘制失败: {exc}")
+            st.warning(T("scatter_failed", error=str(exc)))
 
         # ---- 相关性热力图 ----
         if len(num_cols) >= 2:
-            st.markdown("**参数相关性热力图 (Correlation Heatmap)**")
+            st.markdown(T("correlation_heatmap_title"))
             corr = df[num_cols].corr()
 
             fig_heatmap = go.Figure(data=go.Heatmap(
@@ -1585,14 +1464,14 @@ def _render_visual_analytics(df: pd.DataFrame):
                 x=corr.columns.tolist(),
                 y=corr.index.tolist(),
                 colorscale=[
-                    [0.0, "#F0F7FF"],
-                    [0.5, "#7ABAFF"],
-                    [1.0, "#005CBF"],
+                    [0.0, "#F0F4FF"],
+                    [0.5, "#6B9FD6"],
+                    [1.0, "#0047AB"],
                 ],
                 zmin=-1, zmax=1,
                 text=corr.round(2).values,
                 texttemplate="%{text}",
-                textfont=dict(size=12, color="#333"),
+                textfont=dict(size=12, color="#1D1D1F"),
                 hovertemplate="(%{x}, %{y}): %{z:.3f}<extra></extra>",
                 colorbar=dict(title="r"),
             ))
@@ -1602,26 +1481,21 @@ def _render_visual_analytics(df: pd.DataFrame):
                 xaxis=dict(tickangle=-40),
                 plot_bgcolor="#FFFFFF",
                 paper_bgcolor="#FFFFFF",
-                font=dict(color="#333"),
+                font=dict(color="#1D1D1F"),
             )
             st.plotly_chart(fig_heatmap, width="stretch")
 
-        st.caption(
-            "提示: 散点图展示双变量关系 (含 OLS 趋势线, 需安装 statsmodels); "
-            "热力图展示所有数值列之间的 Pearson 相关系数, "
-            "绝对值越接近 1 表示线性相关性越强。"
-        )
+        st.caption(T("visual_tip"))
 
 
-# ============================================================
-# Report Generation (HTML)
-# ============================================================
+# --- Report Generation (HTML) ---
 def generate_html_report() -> str:
     """生成完整 HTML 报告，模拟 A4 纸排版，浏览器直接打开即可阅读。"""
     now = datetime.now()
     role = st.session_state.get("user_role", "guest").upper()
-    mat = st.session_state.get("material_name", "") or "未指定"
-    eqp = st.session_state.get("equipment_name", "") or "未指定"
+    _ns = T("report_not_specified")
+    mat = st.session_state.get("material_name", "") or _ns
+    eqp = st.session_state.get("equipment_name", "") or _ns
     inp = st.session_state.get("input_columns", [])
     out = st.session_state.get("output_columns", [])
     tvs = st.session_state.get("target_values", {})
@@ -1637,8 +1511,8 @@ def generate_html_report() -> str:
             classes="styled-table", border=0,
         )
     else:
-        data_table = "<p>（无数据）</p>"
-        desc_table = "<p>（无数据）</p>"
+        data_table = f"<p>{T('report_no_data')}</p>"
+        desc_table = f"<p>{T('report_no_data')}</p>"
 
     # ---- 目标表 HTML ----
     active_t = {k: v for k, v in tvs.items() if v}
@@ -1654,12 +1528,12 @@ def generate_html_report() -> str:
             )
         target_html = (
             '<table class="styled-table">'
-            "<thead><tr><th>指标</th><th>目标值</th>"
-            "<th>当前均值</th></tr></thead>"
+            f"<thead><tr><th>{T('report_metric')}</th><th>{T('report_target_value')}</th>"
+            f"<th>{T('report_current_avg')}</th></tr></thead>"
             f"<tbody>{target_rows}</tbody></table>"
         )
     else:
-        target_html = "<p>（未设定量化目标）</p>"
+        target_html = f"<p>{T('report_no_targets')}</p>"
 
     # ---- AI 分析内容 ----
     if ai_result and ai_result.get("success"):
@@ -1682,9 +1556,9 @@ def generate_html_report() -> str:
             else:
                 ai_html += f"<p>{para.replace(chr(10), '<br>')}</p>\n"
     elif ai_result and not ai_result.get("success"):
-        ai_html = f"<p style='color:#c00;'>分析失败: {ai_result.get('error', '未知错误')}</p>"
+        ai_html = f"<p style='color:#c00;'>{T('report_ai_failed', error=ai_result.get('error', 'unknown'))}</p>"
     else:
-        ai_html = "<p style='color:#888;'>尚未执行 AI 分析</p>"
+        ai_html = f"<p style='color:#86868B;'>{T('report_ai_pending')}</p>"
 
     # ---- 完整 HTML ----
     html = f"""<!DOCTYPE html>
@@ -1692,7 +1566,7 @@ def generate_html_report() -> str:
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>NEXUS Lab 实验报告 — {now.strftime('%Y-%m-%d')}</title>
+<title>{T("report_title")} — {now.strftime('%Y-%m-%d')}</title>
 <style>
     * {{ margin: 0; padding: 0; box-sizing: border-box; }}
     body {{
@@ -1708,12 +1582,12 @@ def generate_html_report() -> str:
     }}
     h1 {{
         font-size: 1.8rem; font-weight: 800; color: #1a1a1a;
-        border-bottom: 3px solid #007AFF; padding-bottom: 0.5rem;
+        border-bottom: 3px solid #0047AB; padding-bottom: 0.5rem;
         margin-bottom: 1.5rem;
     }}
-    h1 .accent {{ color: #007AFF; }}
+    h1 .accent {{ color: #0047AB; }}
     h2 {{
-        font-size: 1.2rem; font-weight: 700; color: #007AFF;
+        font-size: 1.2rem; font-weight: 700; color: #0047AB;
         margin-top: 2rem; margin-bottom: 0.8rem;
         padding-bottom: 0.3rem; border-bottom: 1px solid #E0E0E0;
     }}
@@ -1737,7 +1611,7 @@ def generate_html_report() -> str:
         margin: 0.8rem 0 1.2rem 0; font-size: 0.9rem;
     }}
     .styled-table th {{
-        background: #007AFF; color: #FFFFFF;
+        background: #0047AB; color: #FFFFFF;
         padding: 0.6rem 0.8rem; text-align: left;
         font-weight: 600;
     }}
@@ -1752,7 +1626,7 @@ def generate_html_report() -> str:
     }}
     .ai-section {{
         background: #FAFBFF; border: 1px solid #D0E0F5;
-        border-left: 4px solid #007AFF; border-radius: 6px;
+        border-left: 4px solid #0047AB; border-radius: 6px;
         padding: 1.2rem 1.5rem; margin-top: 0.8rem;
     }}
     footer {{
@@ -1769,49 +1643,49 @@ def generate_html_report() -> str:
 <body>
 <div class="paper">
 
-    <h1><span class="accent">NEXUS</span> Lab 实验报告</h1>
+    <h1><span class="accent">JPZ</span> {T("report_title")}</h1>
 
     <div class="meta">
         <div class="meta-item">
-            <div class="meta-label">生成时间</div>
+            <div class="meta-label">{T("report_generated")}</div>
             <div class="meta-value">{now.strftime('%Y-%m-%d %H:%M:%S')}</div>
         </div>
         <div class="meta-item">
-            <div class="meta-label">操作身份</div>
+            <div class="meta-label">{T("report_identity")}</div>
             <div class="meta-value">{role}</div>
         </div>
         <div class="meta-item">
-            <div class="meta-label">研究材料</div>
+            <div class="meta-label">{T("report_material")}</div>
             <div class="meta-value">{mat}</div>
         </div>
         <div class="meta-item">
-            <div class="meta-label">设备 / 工艺</div>
+            <div class="meta-label">{T("report_equipment")}</div>
             <div class="meta-value">{eqp}</div>
         </div>
     </div>
 
-    <h2>1. 语义映射</h2>
+    <h2>{T("report_section_mapping")}</h2>
     <p>
-        <strong>参数列 (Inputs):</strong> {', '.join(inp) if inp else '未指定'}<br>
-        <strong>结果列 (Outputs):</strong> {', '.join(out) if out else '未指定'}
+        <strong>{T("report_inputs_label")}</strong> {', '.join(inp) if inp else _ns}<br>
+        <strong>{T("report_outputs_label")}</strong> {', '.join(out) if out else _ns}
     </p>
 
-    <h2>2. 量化目标</h2>
+    <h2>{T("report_section_targets")}</h2>
     {target_html}
 
-    <h2>3. 实验数据 ({len(df)} 行 x {len(df.columns)} 列)</h2>
+    <h2>{T("report_section_data", rows=len(df), cols=len(df.columns))}</h2>
     {data_table}
 
-    <h2>4. 数据统计摘要</h2>
+    <h2>{T("report_section_stats")}</h2>
     {desc_table}
 
-    <h2>5. AI 分析报告</h2>
+    <h2>{T("report_section_ai")}</h2>
     <div class="ai-section">
         {ai_html}
     </div>
 
     <footer>
-        Generated by NEXUS Intelligent Assistant &mdash; {now.strftime('%Y-%m-%d')}
+        {T("report_footer")} &mdash; {now.strftime('%Y-%m-%d')}
     </footer>
 
 </div>
@@ -1821,15 +1695,13 @@ def generate_html_report() -> str:
     return html
 
 
-# ============================================================
-# Tab: 智能仪表盘 (Dashboard)
-# ============================================================
+# --- Tab: 智能仪表盘 (Dashboard) ---
 def render_dashboard():
-    if st.button(":material/arrow_back: 返回首页", key="back_dashboard"):
+    if st.button(T("back_home"), key="back_dashboard"):
         st.session_state["active_view"] = "home"
         st.rerun()
 
-    st.markdown('<span class="area-title">智能仪表盘</span>', unsafe_allow_html=True)
+    st.markdown(f'<span class="area-title">{T("dashboard_title")}</span>', unsafe_allow_html=True)
 
     df = st.session_state["df"]
     inp = st.session_state["input_columns"]
@@ -1844,11 +1716,11 @@ def render_dashboard():
         <div class="project-card">
             <div style="display:flex; gap:3rem; flex-wrap:wrap;">
                 <div>
-                    <div class="project-label">研究项目</div>
+                    <div class="project-label">{T("research_project")}</div>
                     <div class="project-value">{mat or '—'}</div>
                 </div>
                 <div>
-                    <div class="project-label">设备 / 工艺</div>
+                    <div class="project-label">{T("equipment_process")}</div>
                     <div class="project-value">{eqp or '—'}</div>
                 </div>
             </div>
@@ -1858,7 +1730,7 @@ def render_dashboard():
     # ---- 量化目标卡片 ----
     active_t = {k: v for k, v in tvs.items() if v}
     if active_t:
-        st.markdown("**量化目标**")
+        st.markdown(T("quantitative_targets"))
         t_cols = st.columns(len(active_t))
         for idx, (cn, tv) in enumerate(active_t.items()):
             if cn in df.columns:
@@ -1867,35 +1739,35 @@ def render_dashboard():
                     st.markdown(f"""
                     <div class="target-card">
                         <div class="target-label">{cn}</div>
-                        <div class="target-value">目标: {tv}</div>
-                        <div class="current-value">当前均值: {avg:.2f}</div>
+                        <div class="target-value">{T("target_prefix", val=tv)}</div>
+                        <div class="current-value">{T("current_avg_prefix", avg=avg)}</div>
                     </div>
                     """, unsafe_allow_html=True)
 
     # ---- 补充分析要求 (Custom Prompt) ----
     custom_req = st.text_area(
-        "补充分析要求 (可选)",
+        T("custom_prompt_label"),
         value="",
-        placeholder="例如: 请重点分析温度对硬度的非线性影响, 或对比第3组和第5组实验的差异...",
+        placeholder=T("custom_prompt_placeholder"),
         height=80,
         key="custom_ai_prompt",
     )
 
-    # ---- AI 控制行 ----
-    analyze_btn = st.button("AI 深度分析", type="primary")
+    st.markdown('<div style="height:0.5rem"></div>', unsafe_allow_html=True)
+    analyze_btn = st.button(T("btn_ai_analysis"), type="primary", width="stretch")
 
     if analyze_btn:
         key = st.session_state.get("api_key", "")
         if not key:
-            st.warning("请先在「系统设置」页面配置 Gemini API Key。")
+            st.warning(T("warning_no_api_key"))
         elif df.empty:
-            st.warning("请先在数据工作台录入实验数据。")
+            st.warning(T("warning_no_data"))
         else:
             img_bytes = st.session_state.get("sample_image")
             spinner = (
-                "AI 正在分析数据、图像与目标差距..."
+                T("spinner_with_image")
                 if img_bytes
-                else "AI 正在分析目标差距并生成优化建议..."
+                else T("spinner_no_image")
             )
             with st.spinner(spinner):
                 result = analyze_with_ai(
@@ -1908,27 +1780,27 @@ def render_dashboard():
 
     # ---- 数据摘要 ----
     img_bytes = st.session_state.get("sample_image")
-    img_status = "已上传" if img_bytes else "无"
+    img_status = T("img_uploaded") if img_bytes else T("img_none")
     st.markdown(f"""
     <div class="data-summary">
         <span class="summary-item">
-            <span class="summary-label">实验次数</span><br>
+            <span class="summary-label">{T("summary_experiments")}</span><br>
             <span class="summary-value">{len(df)}</span>
         </span>
         <span class="summary-item">
-            <span class="summary-label">参数列</span><br>
+            <span class="summary-label">{T("summary_param_cols")}</span><br>
             <span class="summary-value">{len(inp)}</span>
         </span>
         <span class="summary-item">
-            <span class="summary-label">结果列</span><br>
+            <span class="summary-label">{T("summary_result_cols")}</span><br>
             <span class="summary-value">{len(out)}</span>
         </span>
         <span class="summary-item">
-            <span class="summary-label">已设目标</span><br>
+            <span class="summary-label">{T("summary_targets_set")}</span><br>
             <span class="summary-value">{len(active_t)}</span>
         </span>
         <span class="summary-item">
-            <span class="summary-label">样品图片</span><br>
+            <span class="summary-label">{T("summary_sample_img")}</span><br>
             <span class="summary-value" style="color:{'#10B981' if img_bytes else '#999'}">
                 {img_status}
             </span>
@@ -1944,7 +1816,7 @@ def render_dashboard():
         col_img = None
 
     with col_tbl:
-        st.markdown("**实验数据预览**")
+        st.markdown(T("data_preview"))
         if inp or out:
             st.dataframe(
                 style_dataframe(df, inp, out),
@@ -1954,14 +1826,14 @@ def render_dashboard():
             st.dataframe(df, width="stretch", height=280)
 
     with col_chart:
-        st.markdown("**结果趋势与目标**")
+        st.markdown(T("trend_and_target"))
         st.plotly_chart(
             create_trend_chart(df, out, tvs), width="stretch",
         )
 
     if col_img is not None and img_bytes:
         with col_img:
-            st.markdown("**样品图片**")
+            st.markdown(T("sample_image_label"))
             st.image(
                 Image.open(io.BytesIO(img_bytes)),
                 caption=st.session_state.get("sample_image_name", ""),
@@ -1978,14 +1850,14 @@ def render_dashboard():
         if ai_result.get("success"):
             has_img = ai_result.get("has_image", False)
             title_l = (
-                "图像形貌与数据关联分析"
+                T("ai_title_img_analysis")
                 if has_img
-                else "目标差距诊断与机理分析"
+                else T("ai_title_no_img_analysis")
             )
             title_r = (
-                "形貌改善与参数建议"
+                T("ai_title_img_suggestion")
                 if has_img
-                else "精准参数建议与预期效果"
+                else T("ai_title_no_img_suggestion")
             )
             a_left, a_right = st.columns(2)
             with a_left:
@@ -2006,34 +1878,32 @@ def render_dashboard():
                         "suggestions", ai_result.get("full_response", "")
                     )
                 )
-            with st.expander("查看完整 AI 报告"):
+            with st.expander(T("view_full_report")):
                 st.markdown(ai_result.get("full_response", ""))
         else:
             st.error(
-                f"AI 分析失败: {ai_result.get('error', '未知错误')}"
+                T("ai_analysis_failed", error=ai_result.get('error', 'unknown'))
             )
     else:
         st.markdown(
-            '<div class="placeholder-box">'
-            '设定目标后，点击「AI 深度分析」获取科学原理溯源与参数优化建议'
-            '</div>',
+            f'<div class="placeholder-box">'
+            f'{T("dashboard_placeholder")}'
+            f'</div>',
             unsafe_allow_html=True,
         )
 
-    # =================================================================
-    # 实验数据追问 (Experiment Q&A) — 默认折叠
-    # =================================================================
+    # --- 实验数据追问 (Experiment Q&A) — 默认折叠 ---
     st.divider()
 
-    with st.expander("实验数据追问 (点击展开)", expanded=False):
+    with st.expander(T("experiment_qa"), expanded=False):
         chat_area = st.container(height=400)
         with chat_area:
             history = st.session_state.get("experiment_chat_history", [])
             if not history:
                 st.markdown(
-                    '<div style="text-align:center; color:#999; padding:2rem 0;">'
-                    '暂无对话。在下方输入您对实验数据的疑问，AI 将基于当前数据表回答。'
-                    '</div>',
+                    f'<div style="text-align:center; color:#86868B; padding:2rem 0;">'
+                    f'{T("qa_no_history")}'
+                    f'</div>',
                     unsafe_allow_html=True,
                 )
             for msg in history:
@@ -2041,7 +1911,7 @@ def render_dashboard():
                     st.markdown(msg["content"])
 
         exp_input = st.chat_input(
-            "输入问题，例如: 哪一组实验的微管密度最低？温度和生长速率有什么关系？",
+            T("qa_input_placeholder"),
             key="exp_chat_input",
         )
 
@@ -2051,29 +1921,28 @@ def render_dashboard():
                 {"role": "user", "content": exp_input}
             )
             if not api_key:
-                answer = "请先在「系统设置」页面配置 Gemini API Key。"
+                answer = T("qa_no_api_key")
             else:
                 csv_data = st.session_state["df"].to_csv(index=False)
                 _mat = st.session_state.get("material_name", "")
                 _inp = st.session_state.get("input_columns", [])
                 _out = st.session_state.get("output_columns", [])
 
-                sys_prompt = (
-                    "你是一位材料科学专家和实验数据分析师。\n"
-                    f"研究材料: {_mat or '未指定'}\n"
-                    f"参数列 (Inputs): {', '.join(_inp) or '未指定'}\n"
-                    f"结果列 (Outputs): {', '.join(_out) or '未指定'}\n\n"
-                    "请基于以下实验数据回答用户问题。用简洁、专业的语言回答。"
-                    "如果数据中找不到答案，请诚实告知。\n\n"
-                    f"实验数据 (CSV):\n```\n{csv_data}\n```"
+                _not_specified = T("report_not_specified")
+                sys_prompt = T(
+                    "qa_system_prompt",
+                    material=_mat or _not_specified,
+                    inputs=", ".join(_inp) or _not_specified,
+                    outputs=", ".join(_out) or _not_specified,
+                    csv=csv_data,
                 )
 
                 recent = st.session_state["experiment_chat_history"][-20:]
                 conversation = ""
                 for m in recent[:-1]:
-                    label = "用户" if m["role"] == "user" else "助手"
+                    label = T("qa_label_user") if m["role"] == "user" else T("qa_label_assistant")
                     conversation += f"{label}: {m['content']}\n\n"
-                conversation += f"用户: {exp_input}"
+                conversation += f"{T('qa_label_user')}: {exp_input}"
 
                 try:
                     genai.configure(api_key=api_key)
@@ -2083,7 +1952,7 @@ def render_dashboard():
                     response = model.generate_content(conversation)
                     answer = response.text
                 except Exception as e:
-                    answer = f"AI 回答失败: {str(e)}"
+                    answer = T("qa_ai_error", error=str(e))
 
             st.session_state["experiment_chat_history"].append(
                 {"role": "assistant", "content": answer}
@@ -2092,9 +1961,7 @@ def render_dashboard():
 
 
 
-# ============================================================
-# Main — Portal Routing
-# ============================================================
+# --- Main — Portal Routing ---
 def main():
     init_session_state()
 
@@ -2125,9 +1992,9 @@ def main():
 
     # 页脚
     st.markdown(
-        '<div class="app-footer">'
-        'NEXUS Lab | Dual-Mode Materials R&D Platform | Powered by Gemini AI'
-        '</div>',
+        f'<div class="app-footer">'
+        f'{T("footer_text")}'
+        f'</div>',
         unsafe_allow_html=True,
     )
 
